@@ -1,19 +1,19 @@
 [
   {
     "name": "Jellyseerr Bridge",
-    "owner": "monjaka",
+    "owner": "kjkoeller",
     "description": "A Jellyfin plugin that provides a Jellyseerr-powered request page with server-side API-key forwarding.",
     "versions": [
       {
-        "url": "https://github.com/monjaka/jellyfin-plugin-jellyseerr-bridge/releases/download/v0.2.0/JellyseerrBridge_0.2.0.0.zip",
-        "checksum": "REPLACE_WITH_RELEASE_ZIP_MD5",
         "version": "0.2.0.0",
-        "repositoryUrl": "https://raw.githubusercontent.com/monjaka/jellyfin-plugin-jellyseerr-bridge/main/manifest.json",
-        "timestamp": "REPLACE_WITH_RELEASE_TIMESTAMP",
-        "sourceUrl": "https://github.com/monjaka/jellyfin-plugin-jellyseerr-bridge/releases/download/v0.2.0/JellyseerrBridge_0.2.0.0.zip",
-        "repositoryName": "Jellyseerr Bridge",
+        "changelog": "Adds support for Jellyfin 12.x. This build does not load on Jellyfin 10.11.x; servers on 10.11.x should stay on 0.1.0.5, which remains in the plugin repository manifest.",
         "targetAbi": "12.0.0.0",
-        "changelog": "Adds support for Jellyfin 12.x (.NET 10). Use 0.1.0.5 for Jellyfin 10.11.x."
+        "sourceUrl": "https://github.com/kjkoeller/jellyfin-plugin-seerr-bridge/releases/download/v0.2.0/JellyseerrBridge_0.2.0.0.zip",
+        "checksum": "0a53cc28b8f8fd0759e45f32a8fc4286",
+        "timestamp": "2026-10-30T13:41:38Z",
+        "repositoryName": "Jellyseerr Bridge",
+        "repositoryUrl": "https://raw.githubusercontent.com/kjkoeller/jellyfin-plugin-seerr-bridge/main/manifest.json",
+        "url": "https://github.com/kjkoeller/jellyfin-plugin-seerr-bridge/releases/download/v0.2.0/JellyseerrBridge_0.2.0.0.zip"
       },
       {
         "url": "https://github.com/monjaka/jellyfin-plugin-jellyseerr-bridge/releases/download/v0.1.5/JellyseerrBridge_0.1.0.5.zip",
