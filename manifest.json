@@ -5,6 +5,17 @@
     "description": "A Jellyfin plugin that provides a Jellyseerr-powered request page with server-side API-key forwarding.",
     "versions": [
       {
+        "version": "0.2.2.0",
+        "changelog": "See the v0.2.2 release notes.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/kjkoeller/jellyfin-plugin-seerr-bridge/releases/download/v0.2.2/JellyseerrBridge_0.2.2.0.zip",
+        "checksum": "ce3be5b0c96d43ade2683d8265a355b8",
+        "timestamp": "2026-10-30T23:16:16Z",
+        "repositoryName": "Jellyseerr Bridge",
+        "repositoryUrl": "https://raw.githubusercontent.com/kjkoeller/jellyfin-plugin-seerr-bridge/main/manifest.json",
+        "url": "https://github.com/kjkoeller/jellyfin-plugin-seerr-bridge/releases/download/v0.2.2/JellyseerrBridge_0.2.2.0.zip"
+      },
+      {
         "version": "0.2.0.0",
         "changelog": "Adds support for Jellyfin 12.x. This build does not load on Jellyfin 10.11.x; servers on 10.11.x should stay on 0.1.0.5, which remains in the plugin repository manifest.",
         "targetAbi": "12.0.0.0",
