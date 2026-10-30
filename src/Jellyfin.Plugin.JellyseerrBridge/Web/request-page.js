@@ -63,8 +63,7 @@
       const token = server?.AccessToken;
       if (!token) return {};
       return {
-        Authorization: `MediaBrowser Client="Jellyseerr Bridge", Device="Browser", DeviceId="jellyseerr-bridge-web", Version="0.1.0", Token="${token}"`,
-        "X-Emby-Token": token
+        Authorization: `MediaBrowser Client="Jellyseerr Bridge", Device="Browser", DeviceId="jellyseerr-bridge-web", Version="0.2.0", Token="${token}"`
       };
     } catch {
       return {};

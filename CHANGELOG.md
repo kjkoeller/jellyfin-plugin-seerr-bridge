@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0.0
+
+Adds support for Jellyfin 12.x. This build does not load on Jellyfin 10.11.x; servers on 10.11.x should stay on 0.1.0.5, which remains in the plugin repository manifest.
+
+Changes:
+
+- Targets .NET 10 and builds against Jellyfin.Controller and Jellyfin.Model 12.0.0, with targetAbi 12.0.0.0 so the build covers 12.0 through 12.4.
+- The request page no longer sends the legacy `X-Emby-Token` header. Jellyfin 12 disables legacy authorization by default, and the standard `Authorization: MediaBrowser` header was already being sent.
+- Release scripts, manifest generators and the CI workflow default to `net10.0`, version 0.2.0.0 and targetAbi 12.0.0.0.
+- The CI workflow uses the .NET 10 SDK and takes the package name from the plugin version instead of a hard-coded 0.1.0.0.
+- Updated install, release and security docs for Jellyfin 12.
+
 ## 0.1.0.5
 
 Simplifies installation around the standard Jellyfin plugin install plus one web-loader installer command.

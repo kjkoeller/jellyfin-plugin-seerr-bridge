@@ -7,8 +7,8 @@ This plugin has two install paths:
 
 ## Requirements
 
-- Jellyfin 10.11.x.
-- .NET SDK 9.0.x to build from source.
+- Jellyfin 12.x (12.0 through 12.4). For Jellyfin 10.11.x, use release 0.1.0.5.
+- .NET SDK 10.0.x to build from source.
 - A working Jellyseerr instance.
 - A Jellyseerr API key from Jellyseerr Settings.
 - Network access from the Jellyfin server to Jellyseerr.
@@ -53,14 +53,14 @@ dotnet build -c Release
 Create a plugin folder on the Jellyfin server:
 
 ```bash
-sudo mkdir -p /var/lib/jellyfin/plugins/JellyseerrBridge_0.1.0.5
+sudo mkdir -p /var/lib/jellyfin/plugins/JellyseerrBridge_0.2.0.0
 ```
 
 Copy the build output into that folder:
 
 ```bash
-sudo cp src/Jellyfin.Plugin.JellyseerrBridge/bin/Release/net9.0/* /var/lib/jellyfin/plugins/JellyseerrBridge_0.1.0.5/
-sudo chown -R jellyfin:jellyfin /var/lib/jellyfin/plugins/JellyseerrBridge_0.1.0.5
+sudo cp src/Jellyfin.Plugin.JellyseerrBridge/bin/Release/net10.0/* /var/lib/jellyfin/plugins/JellyseerrBridge_0.2.0.0/
+sudo chown -R jellyfin:jellyfin /var/lib/jellyfin/plugins/JellyseerrBridge_0.2.0.0
 ```
 
 Restart Jellyfin:
@@ -126,7 +126,7 @@ sudo systemctl stop jellyfin
 Remove the plugin folder:
 
 ```bash
-sudo rm -rf /var/lib/jellyfin/plugins/JellyseerrBridge_0.1.0.5
+sudo rm -rf /var/lib/jellyfin/plugins/JellyseerrBridge_0.2.0.0
 ```
 
 Remove the plugin configuration if you also want to delete saved settings:

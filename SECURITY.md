@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-This preview currently targets Jellyfin 10.11.x.
+This preview currently targets Jellyfin 12.x. Release 0.1.0.5 is the last build for Jellyfin 10.11.x.
 
 ## API Key Handling
 
