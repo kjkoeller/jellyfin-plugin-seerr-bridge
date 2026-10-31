@@ -5,6 +5,17 @@
     "description": "A Jellyfin plugin that provides a Jellyseerr-powered request page with server-side API-key forwarding.",
     "versions": [
       {
+        "version": "0.2.4.0",
+        "changelog": "The plugin now adds the Request tab to Jellyfin Web by itself. No index.html edit or extra plugin is needed.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/kjkoeller/jellyfin-plugin-seerr-bridge/releases/download/v0.2.4/JellyseerrBridge_0.2.4.0.zip",
+        "checksum": "14e537bf3d101980ca3f6cdb75cd28e3",
+        "timestamp": "2026-10-31T17:27:25Z",
+        "repositoryName": "Jellyseerr Bridge",
+        "repositoryUrl": "https://raw.githubusercontent.com/kjkoeller/jellyfin-plugin-seerr-bridge/main/manifest.json",
+        "url": "https://github.com/kjkoeller/jellyfin-plugin-seerr-bridge/releases/download/v0.2.4/JellyseerrBridge_0.2.4.0.zip"
+      },
+      {
         "version": "0.2.3.0",
         "changelog": "Rebuild of 0.2.2.0 with the updated `request-entry.js`. The 0.2.2.0 package shipped the old script by mistake, so none of the 0.2.1.0 or 0.2.2.0 navigation changes below reached Jellyfin until this release.",
         "targetAbi": "12.0.0.0",
