@@ -1,8 +1,12 @@
 (() => {
   "use strict";
 
-  const REQUEST_URL = "/JellyseerrBridge/Page?v=20260614-2305";
+  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.2.3.0";
   const STYLE_ID = "jellyseerr-bridge-request-entry-style";
+
+  // Same plus-in-a-circle icon as the side menu entry, drawn as an SVG for the
+  // avatar menu because the Modern layout may not load the icon font.
+  const REQUEST_ICON_SVG = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false" fill="currentColor"><path d="M13 7h-2v4H7v2h4v4h2v-4h4v-2h-4V7zm-1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>';
 
   function textOf(node) {
     return [
@@ -17,12 +21,12 @@
     if (document.getElementById(STYLE_ID)) return;
     const style = document.createElement("style");
     style.id = STYLE_ID;
-    style.textContent = ".jellyseerr-bridge-request-menu-item{align-items:center;color:inherit;display:flex!important;gap:1rem;min-height:3rem;padding:.75rem 1.25rem;text-decoration:none}.jellyseerr-bridge-request-menu-item:hover,.jellyseerr-bridge-request-menu-item:focus,.jellyseerr-bridge-request-tab:hover,.jellyseerr-bridge-request-tab:focus{color:#00a4dc;text-decoration:none}.jellyseerr-bridge-request-menu-icon{align-items:center;display:inline-flex;font-size:1.45rem;justify-content:center;line-height:1;min-width:1.5rem}.jellyseerr-bridge-request-menu-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.jellyseerr-bridge-request-tab{align-items:center;color:inherit;display:inline-flex;text-decoration:none}";
+    style.textContent = ".jellyseerr-bridge-request-menu-item{align-items:center;color:inherit;display:flex!important;gap:1rem;min-height:3rem;padding:.75rem 1.25rem;text-decoration:none}.jellyseerr-bridge-request-menu-item:hover,.jellyseerr-bridge-request-menu-item:focus,.jellyseerr-bridge-request-tab:hover,.jellyseerr-bridge-request-tab:focus{color:#00a4dc;text-decoration:none}.jellyseerr-bridge-request-menu-icon{align-items:center;display:inline-flex;font-size:1.45rem;justify-content:center;line-height:1;min-width:1.5rem}.jellyseerr-bridge-request-menu-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.jellyseerr-bridge-request-tab{align-items:center;color:inherit;display:inline-flex;text-decoration:none}.jellyseerr-bridge-user-menu-item{align-items:center;color:inherit;display:flex;gap:1rem;text-decoration:none}.jellyseerr-bridge-user-menu-item svg{opacity:.7}";
     document.head.appendChild(style);
   }
 
   function controlsIn(container) {
-    return Array.from(container.querySelectorAll("a, button, [role='button'], [role='menuitem'], [role='link']"));
+    return Array.from(container.querySelectorAll("a, button, [role='button'], [role='menuitem'], [role='link'], [role='tab']"));
   }
 
   function openRequestPage(event) {
@@ -78,7 +82,10 @@
       ".tabs",
       ".headerTabs",
       ".viewMenuBar",
-      ".skinHeader .tabs"
+      ".skinHeader .tabs",
+      // The Modern layout's Home/Favorites tabs are an MUI tab list.
+      ".MuiTabs-flexContainer",
+      "[role='tablist']"
     ];
 
     for (const selector of selectors) {
@@ -147,8 +154,14 @@
     if (referenceRole) link.setAttribute("role", referenceRole);
     const referenceTabIndex = reference?.getAttribute("tabindex");
     if (referenceTabIndex) link.setAttribute("tabindex", referenceTabIndex);
-    link.classList.remove("selected", "active", "is-active", "current");
-    link.removeAttribute("aria-selected");
+    link.classList.remove("selected", "active", "is-active", "current", "Mui-selected");
+    // MUI tabs mark the current tab with aria-selected, so ours has to say it isn't.
+    if (referenceRole === "tab") {
+      link.setAttribute("aria-selected", "false");
+      link.setAttribute("tabindex", "-1");
+    } else {
+      link.removeAttribute("aria-selected");
+    }
 
     return link;
   }
@@ -186,9 +199,44 @@
     }
   }
 
+  // The Modern layout (default in Jellyfin 12) has no side drawer on desktop,
+  // and the Home/Favorites tabs only exist on the home page. The avatar menu
+  // entry means Requests can still be reached from every other page.
+
+  function userMenuLists() {
+    const lists = document.querySelectorAll(".MuiPopover-root ul[role='menu'], .MuiMenu-root ul[role='menu']");
+    return Array.from(lists).filter((list) => {
+      const labels = Array.from(list.querySelectorAll("[role='menuitem']")).map(textOf);
+      return labels.some((label) => label.includes("sign out") || label.includes("log out") || label.includes("logout"));
+    });
+  }
+
+  function insertUserMenuItem() {
+    for (const list of userMenuLists()) {
+      if (list.querySelector(".jellyseerr-bridge-user-menu-item")) continue;
+
+      const items = Array.from(list.querySelectorAll("[role='menuitem']"));
+      const signOut = items.find((item) => /sign out|log ?out/.test(textOf(item)));
+      const reference = items.find((item) => item !== signOut) || items[0];
+
+      ensureStyle();
+      const link = document.createElement("a");
+      link.setAttribute("role", "menuitem");
+      link.setAttribute("tabindex", "-1");
+      // Borrow the MUI classes from a real menu item so spacing and hover match.
+      link.className = `${reference?.getAttribute("class") || ""} jellyseerr-bridge-user-menu-item`.trim();
+      link.innerHTML = `${REQUEST_ICON_SVG}<span>Requests</span>`;
+      wireLink(link);
+
+      if (signOut && signOut.parentElement === list) list.insertBefore(link, signOut);
+      else list.appendChild(link);
+    }
+  }
+
   function insertEntries() {
     insertTopTab();
     insertSideMenuItem();
+    insertUserMenuItem();
   }
 
   insertEntries();

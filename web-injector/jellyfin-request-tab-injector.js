@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.2.2.0";
+  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.2.3.0";
   const STYLE_ID = "jellyseerr-bridge-request-entry-style";
 
   // Same plus-in-a-circle icon as the side menu entry, drawn as an SVG for the

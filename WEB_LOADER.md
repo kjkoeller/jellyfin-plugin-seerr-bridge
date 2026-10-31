@@ -15,7 +15,29 @@ When loaded by Jellyfin Web, it adds:
 - a top `Request` tab beside Home and Favourites
 - a side-menu `Requests` item
 
-## Recommended Install
+## Docker Installs and Jellyfin 12 (Recommended)
+
+On Docker, `index.html` lives inside the Jellyfin image, so the installer script can't reach it from the host, and any edit is lost when the image is updated. Load the script through the JavaScript Injector plugin instead:
+
+1. In Dashboard -> Plugins -> Repositories, add `https://raw.githubusercontent.com/n00bcodr/jellyfin-plugins/main/12/manifest.json`.
+2. Install JavaScript Injector from the catalog and restart Jellyfin.
+3. In the JavaScript Injector settings, add a script with this content:
+
+   ```js
+   const s = document.createElement("script");
+   s.src = "/JellyseerrBridge/Assets/request-entry.js?v=0.2.3.0";
+   document.head.appendChild(s);
+   ```
+
+4. Save, then hard refresh the browser.
+
+Bump the `?v=` value when you update this plugin so browsers fetch the new script instead of a cached one.
+
+In the Modern layout (the default in Jellyfin 12) the entry shows up as a Request tab beside Home and Favorites on the home page, and as a Requests item in the user avatar menu on every page. In the Legacy layout it's a Request tab beside Home and Favourites, plus a side-menu item.
+
+## Index.html Install (Non-Docker)
+
+
 
 Run this on the Jellyfin server after installing the Jellyseerr Bridge plugin:
 

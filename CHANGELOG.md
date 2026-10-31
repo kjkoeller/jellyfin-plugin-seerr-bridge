@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.3.0
+
+Rebuild of 0.2.2.0 with the updated `request-entry.js`. The 0.2.2.0 package shipped the old script by mistake, so none of the 0.2.1.0 or 0.2.2.0 navigation changes below reached Jellyfin until this release.
+
+## 0.2.2.0
+
+Puts the Request tab in the Modern layout's Home/Favorites tab bar.
+
+Changes:
+
+- The Request tab now goes in the Modern layout's Home/Favorites tab bar, styled like the tabs beside it.
+- Removed the header button added in 0.2.1.0. It could appear before the tab bar finished loading and stop the tab from being added.
+- The avatar menu entry stays, so Requests can still be reached from pages without the tab bar.
+
+## 0.2.1.0
+
+Adds the Requests entry to Jellyfin 12's Modern layout, which has no side drawer on desktop.
+
+Changes:
+
+- Adds a Requests button to the Modern header, next to the user avatar, when there's no Home/Favorites tab bar to add a tab to.
+- Adds a Requests item to the user avatar menu, above Sign Out.
+- Documents loading the navigation script through the JavaScript Injector plugin, which keeps working on Docker installs and after Jellyfin updates.
+
 ## 0.2.0.0
 
 Adds support for Jellyfin 12.x. This build does not load on Jellyfin 10.11.x; servers on 10.11.x should stay on 0.1.0.5, which remains in the plugin repository manifest.
