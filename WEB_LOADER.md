@@ -1,41 +1,20 @@
 # Jellyfin Web Navigation Loader
 
-Jellyfin server plugins can serve backend APIs and plugin configuration pages. Jellyfin Web navigation requires adding a small loader tag to Jellyfin Web's `index.html`.
+Since version 0.2.4.0, the plugin adds its navigation script to Jellyfin Web by itself. It edits `index.html` as Jellyfin sends it to the browser, so the file on disk is never changed. That means it works on Docker installs, survives Jellyfin updates, and needs no extra plugins. After installing or updating the plugin, restart Jellyfin and hard refresh the browser.
 
-This repository provides installer and uninstaller scripts so users do not need to edit `index.html` by hand.
-
-This plugin serves a small entry script:
+The script it loads is served by the plugin at:
 
 ```text
 /JellyseerrBridge/Assets/request-entry.js
 ```
 
-When loaded by Jellyfin Web, it adds:
+In the Modern layout (the default in Jellyfin 12) it adds a Request tab beside Home and Favorites on the home page, and a Requests item in the user avatar menu on every page. In the Legacy layout it adds a Request tab beside Home and Favourites, plus a side-menu item.
 
-- a top `Request` tab beside Home and Favourites
-- a side-menu `Requests` item
+If a reverse proxy or CDN caches Jellyfin's `index.html`, purge that cache after installing the plugin, or the browser may keep getting the page without the script.
 
-## Docker Installs and Jellyfin 12 (Recommended)
+The sections below are only needed if the automatic loader doesn't work in your setup.
 
-On Docker, `index.html` lives inside the Jellyfin image, so the installer script can't reach it from the host, and any edit is lost when the image is updated. Load the script through the JavaScript Injector plugin instead:
-
-1. In Dashboard -> Plugins -> Repositories, add `https://raw.githubusercontent.com/n00bcodr/jellyfin-plugins/main/12/manifest.json`.
-2. Install JavaScript Injector from the catalog and restart Jellyfin.
-3. In the JavaScript Injector settings, add a script with this content:
-
-   ```js
-   const s = document.createElement("script");
-   s.src = "/JellyseerrBridge/Assets/request-entry.js?v=0.2.3.0";
-   document.head.appendChild(s);
-   ```
-
-4. Save, then hard refresh the browser.
-
-Bump the `?v=` value when you update this plugin so browsers fetch the new script instead of a cached one.
-
-In the Modern layout (the default in Jellyfin 12) the entry shows up as a Request tab beside Home and Favorites on the home page, and as a Requests item in the user avatar menu on every page. In the Legacy layout it's a Request tab beside Home and Favourites, plus a side-menu item.
-
-## Index.html Install (Non-Docker)
+## Manual Fallback: Index.html Installer Script
 
 
 

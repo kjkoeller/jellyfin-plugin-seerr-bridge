@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4.0
+
+The plugin now adds the Request tab to Jellyfin Web by itself. No index.html edit or extra plugin is needed.
+
+Changes:
+
+- Adds the Request tab loader to Jellyfin Web's index.html as the server sends it to the browser. The file on disk isn't changed, so this works on Docker installs and keeps working after Jellyfin image updates.
+- Skips adding the loader if the page already has it, for example from an older manual index.html edit.
+- The tab script only runs once even if it's loaded more than one way.
+
 ## 0.2.3.0
 
 Rebuild of 0.2.2.0 with the updated `request-entry.js`. The 0.2.2.0 package shipped the old script by mistake, so none of the 0.2.1.0 or 0.2.2.0 navigation changes below reached Jellyfin until this release.

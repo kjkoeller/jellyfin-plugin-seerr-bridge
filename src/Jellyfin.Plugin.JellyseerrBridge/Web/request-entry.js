@@ -1,7 +1,12 @@
 (() => {
   "use strict";
 
-  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.2.3.0";
+  // The plugin now adds this script to Jellyfin Web on its own. If an older manual
+  // index.html edit or an injector plugin loads it as well, only the first copy runs.
+  if (window.__jellyseerrBridgeEntryLoaded) return;
+  window.__jellyseerrBridgeEntryLoaded = true;
+
+  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.2.4.0";
   const STYLE_ID = "jellyseerr-bridge-request-entry-style";
 
   // Same plus-in-a-circle icon as the side menu entry, drawn as an SVG for the
