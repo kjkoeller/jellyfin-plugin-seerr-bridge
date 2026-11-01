@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.8.0
+
+Request missing seasons straight from a show's page in Jellyfin.
+
+Changes:
+
+- Show pages in Jellyfin get a Request seasons button next to Play and Favorite, labelled with how many seasons are missing. It only appears when there's something to request and request submission is turned on.
+- The button opens a list of every season marked In library, Partly in library, Missing, Requested, Downloading or Not aired yet. Missing seasons start ticked, so requesting all of them is one click. Any missing or upcoming season can be ticked or unticked before sending.
+- Which seasons count as missing comes from both Jellyseerr (every season the show has, and what's already requested) and Jellyfin (which episodes are on disk), so it's right even if Jellyseerr hasn't scanned the library lately. Specials are left out.
+- The chosen seasons go to Jellyseerr as one request, and the dialog links to the Requests page to follow progress.
+
 ## 0.2.7.0
 
 Richer detail pages, and a way back into Jellyfin once something's in the library.
