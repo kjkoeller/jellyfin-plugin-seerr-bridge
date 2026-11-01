@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.JellyseerrBridge.Configuration;
 using Jellyfin.Plugin.JellyseerrBridge.Models;
+using Jellyfin.Plugin.JellyseerrBridge.Privacy;
 using MediaBrowser.Common.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -603,7 +604,9 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
         return new ContentResult
         {
             StatusCode = (int)response.StatusCode,
-            Content = body,
+            // Jellyseerr answers as if an admin were asking, so strip out other people's
+            // details and admin-only links before this reaches a browser.
+            Content = SeerrResponseSanitizer.Sanitize(body),
             ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json"
         };
     }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2.0
+
+Stops other users' details and admin-only information reaching the browser.
+
+Changes:
+
+- Everything the plugin passes on from Jellyseerr is now cleaned on the server first. Jellyseerr answers the plugin as if an admin were asking, so its responses could include who requested or reported each title (with email addresses on versions before Seerr 3.5.0), problem report comments, links into Radarr and Sonarr, and download release names. Any signed-in Jellyfin user could see these in the browser's developer tools. They're now removed, and the request page looks exactly the same.
+- Fields are only removed if they're present, so this works with Seerr 3.5.0 and later, which already strip some of them, and with older Jellyseerr versions that don't.
+- For requests, downloads and seasons, only the fields the request page uses are kept, so anything Jellyseerr adds to them in future stays out until it's deliberately let through.
+
 ## 0.3.1.0
 
 Security hardening for admins and users. SECURITY.md describes everything the plugin now does.

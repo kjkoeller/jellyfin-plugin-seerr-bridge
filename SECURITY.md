@@ -20,6 +20,17 @@ The current release line targets Jellyfin 12.x. Release 0.1.0.5 is the last buil
 - The Allowed Jellyfin User IDs setting limits who can request titles and report problems.
 - Turning off "Add Jellyfin users to Jellyseerr automatically" means only people you've imported into Jellyseerr yourself can request anything.
 
+### Other people's details stay private
+
+The plugin asks Jellyseerr for things with the admin API key, so Jellyseerr answers as if an admin were looking. Before anything is sent to a browser, the plugin removes:
+
+- who requested, approved or reported each title, and their account details (on Jellyseerr versions before Seerr 3.5.0 these could include email addresses)
+- problem reports and their comments
+- links into Radarr, Sonarr, Plex and Jellyfin, and the IDs Jellyseerr uses for them
+- download release names and download client IDs, leaving only the progress
+
+The request page only gets what it shows: titles, statuses, dates and download progress. Fields are only removed if they're there, so this works the same on Seerr 3.5.0 and later, which already leave some of them out.
+
 ### Not an open proxy
 
 The plugin only talks to a fixed list of Jellyseerr endpoints, and checks what's passed through:
