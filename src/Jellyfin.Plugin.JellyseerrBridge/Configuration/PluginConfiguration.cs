@@ -31,4 +31,11 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets the Jellyfin user IDs allowed to submit requests. Empty allows any authenticated Jellyfin user.
     /// </summary>
     public string[] AllowedUserIds { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether Jellyfin users without a Jellyseerr account are
+    /// added to Jellyseerr automatically the first time they request something. When off, an
+    /// admin has to import them in Jellyseerr first.
+    /// </summary>
+    public bool AutoAddUsersToJellyseerr { get; set; } = true;
 }

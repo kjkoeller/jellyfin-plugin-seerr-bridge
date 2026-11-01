@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1.0
+
+Security hardening for admins and users. SECURITY.md describes everything the plugin now does.
+
+Changes:
+
+- Users get a plain message when Jellyseerr can't be reached or fails. The details, which can include internal hostnames and ports, go to the Jellyfin log instead of the browser.
+- The request page is served with a strict Content-Security-Policy and `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy` headers. The page can see the user's Jellyfin sign-in, so this limits what an injected script could do if a bug ever allowed one.
+- Search text, page numbers, discover filters and problem report fields are checked before being passed to Jellyseerr. Filter values that don't look like what the request page sends are dropped.
+- Per-user rate limits: 30 requests and 5 problem reports per 10 minutes, and 60 loads of My Requests. Going over gets a "try again in a few minutes" message.
+- New setting to turn off adding Jellyfin users to Jellyseerr automatically, for admins who want to choose who gets an account.
+- The Allowed Jellyfin User IDs setting now covers problem reports as well as requests, and people not on the list get a clear message instead of a bare 403.
+- The settings page no longer shows the saved Jellyseerr API key. Leave the field blank to keep it, or type a new one to replace it.
+- If Jellyfin Web remembers sign-ins for several servers, the request page and show page button only use the one for the server they're running on.
+
 ## 0.3.0.0
 
 Requests now belong to the person who made them, with a My Requests tab, request limits and problem reports built on that.

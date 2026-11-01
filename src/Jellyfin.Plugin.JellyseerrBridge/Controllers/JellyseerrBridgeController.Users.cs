@@ -45,13 +45,19 @@ public sealed partial class JellyseerrBridgeController
     [HttpGet("MyRequests")]
     public async Task<IActionResult> MyRequests([FromQuery] int page = 1, CancellationToken cancellationToken = default)
     {
+        // Each page looks up 20 titles in Jellyseerr, so keep this from being hammered.
+        if (RateLimit("my-requests", 60, TimeSpan.FromMinutes(10)) is IActionResult tooMany)
+        {
+            return tooMany;
+        }
+
         var seerrUser = await ResolveSeerrUserAsync(cancellationToken).ConfigureAwait(false);
         if (seerrUser.Id is not int seerrUserId)
         {
             return StatusCode(403, new { message = seerrUser.Error });
         }
 
-        page = Math.Max(page, 1);
+        page = Math.Clamp(page, 1, 250);
         try
         {
             using var client = CreateClient(seerrUserId);
@@ -139,9 +145,20 @@ public sealed partial class JellyseerrBridgeController
             return BadRequest(new { message = "Describe the problem in 2000 characters or fewer." });
         }
 
-        if (issue.ProblemSeason < 0 || issue.ProblemEpisode < 0)
+        if (issue.ProblemSeason is < 0 or > 500 || issue.ProblemEpisode is < 0 or > 10000)
         {
-            return BadRequest(new { message = "Season and episode can't be negative." });
+            return BadRequest(new { message = "That season or episode number doesn't look right." });
+        }
+
+        // The allowed users setting covers anything that creates something in Jellyseerr.
+        if (!IsUserAllowed(GetConfig()))
+        {
+            return StatusCode(403, new { message = "Your account isn't allowed to report problems. Ask an admin if you think it should be." });
+        }
+
+        if (RateLimit("issue", 5, TimeSpan.FromMinutes(10)) is IActionResult tooMany)
+        {
+            return tooMany;
         }
 
         var seerrUser = await ResolveSeerrUserAsync(cancellationToken).ConfigureAwait(false);
@@ -198,16 +215,27 @@ public sealed partial class JellyseerrBridgeController
             return new SeerrUserLookup(cached.Id, null);
         }
 
+        var autoAdd = GetConfig().AutoAddUsersToJellyseerr;
         int? seerrUserId;
         try
         {
             using var client = CreateClient();
-            seerrUserId = await FindSeerrUserAsync(client, jellyfinUserId, cancellationToken).ConfigureAwait(false)
-                ?? await ImportSeerrUserAsync(client, jellyfinUserId, cancellationToken).ConfigureAwait(false);
+            seerrUserId = await FindSeerrUserAsync(client, jellyfinUserId, cancellationToken).ConfigureAwait(false);
+            if (seerrUserId is null && autoAdd)
+            {
+                seerrUserId = await ImportSeerrUserAsync(client, jellyfinUserId, cancellationToken).ConfigureAwait(false);
+            }
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException)
         {
-            return new SeerrUserLookup(null, ex.Message);
+            return new SeerrUserLookup(null, "Jellyseerr Bridge isn't set up yet. Ask an admin to add the Jellyseerr URL and API key.");
+        }
+
+        if (seerrUserId is null && !autoAdd)
+        {
+            return new SeerrUserLookup(
+                null,
+                "You don't have a Jellyseerr account yet. Ask an admin to add you in Jellyseerr under Users, Import Jellyfin Users.");
         }
 
         if (seerrUserId is null)

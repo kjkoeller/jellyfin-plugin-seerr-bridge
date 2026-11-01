@@ -6,7 +6,7 @@
   if (window.__jellyseerrBridgeEntryLoaded) return;
   window.__jellyseerrBridgeEntryLoaded = true;
 
-  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.3.0.0";
+  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.3.1.0";
   const STYLE_ID = "jellyseerr-bridge-request-entry-style";
 
   // Same plus-in-a-circle icon as the side menu entry, drawn as an SVG for the
@@ -275,8 +275,19 @@
       // Fall through to the stored credentials.
     }
     try {
-      const servers = JSON.parse(localStorage.getItem("jellyfin_credentials") || "{}").Servers || [];
-      const server = servers.find((entry) => entry.AccessToken && entry.UserId);
+      // Only this server's token: if Jellyfin Web remembers several servers, never send another
+      // server's token here. With just one saved server, it's this one.
+      const servers = (JSON.parse(localStorage.getItem("jellyfin_credentials") || "{}").Servers || [])
+        .filter((entry) => entry.AccessToken && entry.UserId);
+      const isThisServer = (address) => {
+        try {
+          return Boolean(address) && new URL(address).origin === location.origin;
+        } catch {
+          return false;
+        }
+      };
+      const server = servers.find((entry) => [entry.ManualAddress, entry.LocalAddress, entry.RemoteAddress].some(isThisServer))
+        || (servers.length === 1 ? servers[0] : null);
       return server ? { token: server.AccessToken, userId: server.UserId } : null;
     } catch {
       return null;
