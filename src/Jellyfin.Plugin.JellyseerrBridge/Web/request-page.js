@@ -2,6 +2,11 @@
   "use strict";
 
   const API = "/JellyseerrBridge";
+
+  // How often titles that are waiting or downloading get re-checked while the page is open.
+  // Jellyseerr itself only syncs with Radarr and Sonarr about once a minute.
+  const REFRESH_MS = 30000;
+  const MAX_REFRESH_PER_ROUND = 8;
   const CATEGORIES = [
     { id: "trending", label: "Trending" },
     { id: "movies", label: "Movies" },
@@ -19,6 +24,9 @@
     detailLoading: false,
     detail: null,
     detailBase: null,
+    // Ratings, similar titles and the film collection for the open detail page. These load
+    // after the main details so the page doesn't wait on them.
+    extras: null,
     results: [],
     local: new Map(),
     pending: new Set(),
@@ -161,11 +169,13 @@
   async function loadDetail(item) {
     state.detailBase = item;
     state.detail = null;
+    state.extras = null;
     state.detailLoading = true;
     renderBody();
     try {
       const endpoint = item.mediaType === "tv" ? `/Tv/${item.id}` : `/Movie/${item.id}`;
       state.detail = normalizeDetail(await apiGet(endpoint), item);
+      loadExtras(state.detail);
     } catch (error) {
       state.detail = { ...item, error: error.message };
     } finally {
@@ -173,6 +183,57 @@
       renderBody();
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
+  }
+
+  // Each of these is optional. If one fails (an older Jellyseerr without the ratings
+  // endpoint, say), that section is just left out.
+  async function loadExtras(item) {
+    const base = item.mediaType === "tv" ? `/Tv/${item.id}` : `/Movie/${item.id}`;
+    const [ratings, recommendations, collection] = await Promise.allSettled([
+      apiGet(`${base}/Ratings`),
+      apiGet(`${base}/Recommendations`),
+      item.collection ? apiGet(`/Collection/${item.collection.id}`) : Promise.resolve(null)
+    ]);
+
+    // The user may have opened a different title while these were loading.
+    if (!state.detail || key(state.detail) !== key(item)) return;
+
+    state.extras = {
+      ratings: ratings.status === "fulfilled" ? normalizeRatings(ratings.value) : [],
+      recommendations: recommendations.status === "fulfilled"
+        ? normalize(recommendations.value?.results || []).filter((entry) => key(entry) !== key(item)).slice(0, 12)
+        : [],
+      collection: collection.status === "fulfilled" && collection.value
+        ? normalizeCollection(collection.value, item.collection)
+        : null
+    };
+    renderBody();
+  }
+
+  function normalizeCollection(collection, fallback) {
+    const parts = normalize((collection.parts || []).map((part) => ({ ...part, mediaType: part.mediaType || "movie" })))
+      .sort((left, right) => compareDate(left.releaseDate, right.releaseDate));
+    return parts.length > 1 ? { id: collection.id || fallback.id, name: collection.name || fallback.name, parts } : null;
+  }
+
+  // Jellyseerr's movie ratings have Rotten Tomatoes under "rt" and IMDb under "imdb". The
+  // older and TV endpoints return the Rotten Tomatoes object on its own.
+  function normalizeRatings(value) {
+    if (!value || typeof value !== "object") return [];
+    const rottenTomatoes = value.rt || (value.criticsScore !== undefined ? value : null);
+    const imdb = value.imdb || null;
+    const ratings = [];
+
+    if (imdb && Number(imdb.criticsScore) > 0) {
+      ratings.push({ label: "IMDb", value: Number(imdb.criticsScore).toFixed(1), url: imdb.url });
+    }
+    if (rottenTomatoes && Number.isFinite(Number(rottenTomatoes.criticsScore)) && rottenTomatoes.criticsScore !== null) {
+      ratings.push({ label: "Rotten Tomatoes", value: `${rottenTomatoes.criticsScore}%`, url: rottenTomatoes.url });
+    }
+    if (rottenTomatoes && Number.isFinite(Number(rottenTomatoes.audienceScore)) && rottenTomatoes.audienceScore !== null) {
+      ratings.push({ label: "Audience", value: `${rottenTomatoes.audienceScore}%`, url: rottenTomatoes.url });
+    }
+    return ratings;
   }
 
   function normalize(items) {
@@ -209,6 +270,12 @@
       mediaInfo: detail.mediaInfo || base.mediaInfo
     });
     item.seasons = base.mediaType === "tv" ? normalizeSeasons(detail, item) : [];
+    item.cast = (detail.credits?.cast || []).slice(0, 15).map((person) => ({
+      name: person.name || "",
+      character: person.character || "",
+      profilePath: person.profilePath || ""
+    })).filter((person) => person.name);
+    item.collection = detail.collection?.id ? { id: detail.collection.id, name: detail.collection.name || "Collection" } : null;
     return item;
   }
 
@@ -415,10 +482,14 @@
     return String(left.title || "").localeCompare(String(right.title || ""), undefined, { sensitivity: "base", numeric: true });
   }
 
+  // Jellyseerr's media status numbers. 2 means the request is waiting for an admin, 3 means
+  // it was approved and handed to Radarr or Sonarr.
   function statusName(status) {
     if (status === 5) return "available";
     if (status === 4) return "partially available";
-    if (status === 2 || status === 3) return "requested";
+    if (status === 3) return "approved";
+    if (status === 2) return "pending approval";
+    if (status === 6) return "blocklisted";
     if (status === 7) return "deleted";
     return "not available";
   }
@@ -426,19 +497,179 @@
   function statusFor(item) {
     const local = state.local.get(key(item));
     if (local) return local;
+    if (downloadsFor(item).length) return "downloading";
     return statusName(item.mediaInfo?.status);
   }
 
   function statusForSeason(show, season) {
     const local = state.local.get(seasonKey(show, season.seasonNumber));
     if (local) return local;
+    if (downloadsFor(show, season.seasonNumber).length) return "downloading";
     return statusName(season.status);
+  }
+
+  // Jellyseerr copies Radarr's and Sonarr's download queues onto each title as
+  // mediaInfo.downloadStatus. For shows there's one entry per episode being downloaded.
+  function downloadsFor(item, seasonNumber) {
+    const downloads = item?.mediaInfo?.downloadStatus || [];
+    if (seasonNumber === undefined) return downloads;
+    return downloads.filter((download) => Number(download.episode?.seasonNumber) === seasonNumber);
+  }
+
+  function summarizeDownloads(downloads) {
+    if (!downloads.length) return null;
+
+    let size = 0;
+    let sizeLeft = 0;
+    let finishesAt = 0;
+    for (const download of downloads) {
+      size += Number(download.size) || 0;
+      sizeLeft += Number(download.sizeLeft) || 0;
+      finishesAt = Math.max(finishesAt, finishTime(download));
+    }
+
+    const states = downloads.map((download) => String(download.status || "").toLowerCase());
+    return {
+      count: downloads.length,
+      percent: size > 0 ? Math.min(100, Math.max(0, Math.round(((size - sizeLeft) / size) * 100))) : null,
+      state: states.includes("downloading") ? "downloading" : (states[0] || "queued"),
+      finishesAt
+    };
+  }
+
+  // Prefers the estimated completion time. Falls back to Radarr's "timeLeft", which looks
+  // like "00:12:34", or "1.02:03:04" when it's more than a day.
+  function finishTime(download) {
+    const eta = Date.parse(download.estimatedCompletionTime || "");
+    if (!Number.isNaN(eta)) return eta;
+
+    const match = String(download.timeLeft || "").match(/^(?:(\d+)\.)?(\d+):(\d+):(\d+)/);
+    if (!match) return 0;
+    const [, days, hours, minutes, seconds] = match.map((part) => Number(part) || 0);
+    return Date.now() + ((((days * 24) + hours) * 60 + minutes) * 60 + seconds) * 1000;
+  }
+
+  function describeDownloadState(downloadState) {
+    switch (downloadState) {
+      case "queued":
+      case "delay":
+        return "Queued";
+      case "paused":
+        return "Paused";
+      case "completed":
+      case "importing":
+      case "importpending":
+        return "Finishing up";
+      case "warning":
+        return "Download has a problem";
+      case "failed":
+        return "Download failed";
+      default:
+        return "Downloading";
+    }
+  }
+
+  function timeLeftText(finishesAt) {
+    const milliseconds = finishesAt - Date.now();
+    if (!finishesAt || milliseconds <= 0) return "";
+
+    const minutes = Math.round(milliseconds / 60000);
+    if (minutes < 1) return "less than a minute left";
+    if (minutes < 60) return `about ${minutes} min left`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `about ${hours} h ${minutes % 60} min left`;
+
+    const days = Math.round(hours / 24);
+    return `about ${days} day${days === 1 ? "" : "s"} left`;
+  }
+
+  function downloadText(summary, mediaType) {
+    let text = describeDownloadState(summary.state);
+    if (summary.percent !== null) text += ` ${summary.percent}%`;
+
+    const parts = [text];
+    if (summary.count > 1) parts.push(`${summary.count} ${mediaType === "tv" ? "episodes" : "downloads"}`);
+    if (summary.state === "downloading") {
+      const remaining = timeLeftText(summary.finishesAt);
+      if (remaining) parts.push(remaining);
+    }
+    return parts.join(", ");
+  }
+
+  function renderProgress(downloads, mediaType, extraClass = "") {
+    const summary = summarizeDownloads(downloads);
+    if (!summary) return "";
+
+    const text = downloadText(summary, mediaType);
+    const percent = summary.percent ?? 0;
+    const idle = summary.state === "downloading" ? "" : " idle";
+    return [
+      `<div class="download-progress${extraClass ? ` ${escapeHtml(extraClass)}` : ""}">`,
+      `<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}" aria-label="${escapeHtml(text)}">`,
+      `<div class="progress-fill${idle}" style="width: ${percent}%"></div>`,
+      `</div>`,
+      `<div class="progress-text">${escapeHtml(text)}</div>`,
+      `</div>`
+    ].join("");
+  }
+
+  // A short explanation under the request button on the detail page, so nobody is left
+  // guessing what "approved" means when nothing is downloading yet.
+  function statusNote(status) {
+    if (status === "pending approval") return "Waiting for an admin to approve the request in Jellyseerr.";
+    if (status === "approved") return "Approved. Waiting for a download to start, or for Jellyfin to add the finished download.";
+    if (status === "requested") return "Request sent. Checking its status...";
+    return "";
+  }
+
+  // Jellyseerr stores the Jellyfin item ID once a title is in the library. The request page
+  // lives at /JellyseerrBridge/Page, so "../web/" reaches Jellyfin Web even with a base URL.
+  function jellyfinUrl(item) {
+    const id = item?.mediaInfo?.jellyfinMediaId;
+    if (!id || !/^[0-9a-f-]{32,36}$/i.test(id)) return "";
+    const status = item.mediaInfo.status;
+    return status === 4 || status === 5 ? `../web/#/details?id=${encodeURIComponent(id)}` : "";
+  }
+
+  function renderOpenLink(item, extraClass = "") {
+    const url = jellyfinUrl(item);
+    return url ? `<a class="action open${extraClass ? ` ${escapeHtml(extraClass)}` : ""}" href="${escapeHtml(url)}">Open in Jellyfin</a>` : "";
+  }
+
+  // Jellyseerr's request status numbers. 3 is declined and 4 means it couldn't be sent to
+  // Radarr or Sonarr. Every request currently goes in under the Jellyseerr admin, so this
+  // says "a request" rather than naming who asked.
+  function requestHistory(item) {
+    const requests = (item?.mediaInfo?.requests || []).filter((request) => !request.is4k);
+    if (!requests.length) return "";
+
+    const latest = requests.reduce((newest, request) => (
+      Date.parse(request.createdAt || "") > Date.parse(newest.createdAt || "") ? request : newest
+    ));
+    const date = formatDate(latest.createdAt);
+    const when = date ? ` on ${date}` : "";
+
+    if (latest.status === 3) return `A request${when} was declined. You can request it again.`;
+    if (latest.status === 4) return `A request${when} couldn't be sent to the download manager. An admin needs to retry it in Jellyseerr.`;
+    return date ? `Requested on ${date}.` : "";
+  }
+
+  function formatDate(value) {
+    const time = Date.parse(value || "");
+    return Number.isNaN(time) ? "" : new Date(time).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+
+  function safeExternalUrl(value) {
+    return /^https:\/\//i.test(value || "") ? value : "";
   }
 
   function actionForStatus(label, status, pending) {
     if (pending) return { label: "Requesting", disabled: true, muted: true };
     if (status === "available") return { label: "Available", disabled: true, muted: true };
-    if (status === "requested" || status === "processing" || status === "pending") return { label: "Requested", disabled: true, muted: true };
+    if (status === "downloading") return { label: "Downloading", disabled: true, muted: true };
+    if (status === "requested" || status === "pending approval" || status === "approved") return { label: "Requested", disabled: true, muted: true };
+    if (status === "blocklisted") return { label: "Blocked", disabled: true, muted: true };
     if (status.startsWith("error:")) return { label: "Retry", disabled: false, muted: false, error: true };
     const requestsDisabled = state.status?.requestSubmissionEnabled === false;
     return { label, disabled: requestsDisabled, muted: requestsDisabled };
@@ -478,13 +709,8 @@
     try {
       await apiPost("/Request", requestBody(item, seasonNumber));
       state.local.set(itemKey, "requested");
-      if (seasonNumber === undefined) {
-        item.mediaInfo = item.mediaInfo || {};
-        item.mediaInfo.status = 2;
-      } else {
-        const season = item.seasons?.find((entry) => entry.seasonNumber === seasonNumber);
-        if (season) season.status = 2;
-      }
+      // Jellyseerr may auto-approve, so look up what actually happened rather than assume.
+      refreshTitles([item]);
     } catch (error) {
       state.local.set(itemKey, error.message.toLowerCase().includes("already") ? "requested" : `error: ${error.message}`);
     } finally {
@@ -567,11 +793,15 @@
       `<div class="status">${escapeHtml(meta)}</div>`,
       `<h2>${escapeHtml(item.title)}${item.year ? ` (${escapeHtml(item.year)})` : ""}</h2>`,
       item.tagline ? `<div class="tagline">${escapeHtml(item.tagline)}</div>` : "",
+      renderRatings(item),
       item.overview ? `<p class="overview">${escapeHtml(item.overview)}</p>` : `<p class="overview">No overview available.</p>`,
       item.mediaType === "movie" ? renderMovieAction(item) : renderSeriesSummary(item),
       `</div>`,
       `</section>`,
       item.mediaType === "tv" ? renderSeasonGrid(item) : "",
+      renderCast(item),
+      renderCollection(),
+      renderRecommendations(),
       `</article>`
     ].join("");
   }
@@ -579,13 +809,120 @@
   function renderMovieAction(item) {
     const action = actionFor(item);
     const payload = escapeHtml(JSON.stringify({ id: item.id, mediaType: item.mediaType }));
-    return `<button class="action detail-action${action.muted ? " muted" : ""}${action.error ? " error" : ""}" data-request="${payload}" ${action.disabled ? "disabled" : ""}>${escapeHtml(action.label)}</button>`;
+    const openLink = renderOpenLink(item, "detail-action");
+    return [
+      // Once it's in the library, opening it is more useful than a greyed-out "Available".
+      openLink || `<button class="action detail-action${action.muted ? " muted" : ""}${action.error ? " error" : ""}" data-request="${payload}" ${action.disabled ? "disabled" : ""}>${escapeHtml(action.label)}</button>`,
+      renderProgress(downloadsFor(item), item.mediaType, "detail-progress"),
+      renderNotes(item, statusFor(item))
+    ].join("");
   }
 
   function renderSeriesSummary(item) {
     const seasonCount = item.seasons?.length || 0;
     const status = statusFor(item);
-    return `<div class="series-summary">${escapeHtml(seasonCount)} seasons - ${escapeHtml(status)}</div>`;
+    return [
+      `<div class="series-summary">${escapeHtml(seasonCount)} seasons - ${escapeHtml(status)}</div>`,
+      renderOpenLink(item, "detail-action"),
+      renderProgress(downloadsFor(item), item.mediaType, "detail-progress"),
+      renderNotes(item, status)
+    ].join("");
+  }
+
+  function renderNotes(item, status) {
+    const notes = [statusNote(status), requestHistory(item)].filter(Boolean);
+    return notes.map((note) => `<div class="status-note">${escapeHtml(note)}</div>`).join("");
+  }
+
+  function renderRatings(item) {
+    const ratings = [
+      ...(Number(item.rating) > 0 ? [{ label: "TMDB", value: Number(item.rating).toFixed(1), url: "" }] : []),
+      ...(state.extras?.ratings || [])
+    ];
+    if (!ratings.length) return "";
+
+    return `<div class="ratings">${ratings.map((rating) => {
+      const url = safeExternalUrl(rating.url);
+      const content = `<span class="rating-label">${escapeHtml(rating.label)}</span> <span class="rating-value">${escapeHtml(rating.value)}</span>`;
+      return url
+        ? `<a class="rating" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${content}</a>`
+        : `<span class="rating">${content}</span>`;
+    }).join("")}</div>`;
+  }
+
+  function renderCast(item) {
+    if (!item.cast?.length) return "";
+    return [
+      `<section class="extra-section">`,
+      `<h3>Cast</h3>`,
+      `<div class="cast-row">`,
+      item.cast.map((person) => [
+        `<div class="cast-member">`,
+        person.profilePath
+          ? `<img class="cast-photo" alt="" loading="lazy" src="https://image.tmdb.org/t/p/w185${escapeHtml(person.profilePath)}">`
+          : `<div class="cast-photo cast-photo-fallback">${escapeHtml(initials(person.name))}</div>`,
+        `<div class="cast-name">${escapeHtml(person.name)}</div>`,
+        person.character ? `<div class="cast-character">${escapeHtml(person.character)}</div>` : "",
+        `</div>`
+      ].join("")).join(""),
+      `</div>`,
+      `</section>`
+    ].join("");
+  }
+
+  function initials(name) {
+    return String(name || "").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+  }
+
+  function missingCollectionParts(collection) {
+    return (collection?.parts || []).filter((part) => {
+      const status = statusFor(part);
+      return (status === "not available" || status === "deleted" || status.startsWith("error:")) && !state.pending.has(key(part));
+    });
+  }
+
+  function renderCollection() {
+    const collection = state.extras?.collection;
+    if (!collection) return "";
+
+    const missing = missingCollectionParts(collection);
+    const available = collection.parts.filter((part) => statusFor(part) === "available").length;
+    const requestsDisabled = state.status?.requestSubmissionEnabled === false;
+    const busy = collection.parts.some((part) => state.pending.has(key(part)));
+    const label = busy
+      ? "Requesting..."
+      : missing.length
+        ? `Request ${missing.length} missing movie${missing.length === 1 ? "" : "s"}`
+        : "Every movie is requested or available";
+    const disabled = requestsDisabled || busy || !missing.length;
+
+    return [
+      `<section class="extra-section">`,
+      `<h3>${escapeHtml(collection.name)}</h3>`,
+      `<div class="status-note">${escapeHtml(collection.parts.length)} movies, ${escapeHtml(available)} available</div>`,
+      `<button class="action detail-action${disabled ? " muted" : ""}" data-request-collection="true" ${disabled ? "disabled" : ""}>${escapeHtml(label)}</button>`,
+      `<div class="grid">${collection.parts.map(renderCard).join("")}</div>`,
+      `</section>`
+    ].join("");
+  }
+
+  function renderRecommendations() {
+    const items = state.extras?.recommendations || [];
+    if (!items.length) return "";
+    return [
+      `<section class="extra-section">`,
+      `<h3>You might also like</h3>`,
+      `<div class="grid">${items.map(renderCard).join("")}</div>`,
+      `</section>`
+    ].join("");
+  }
+
+  // One at a time, so Jellyseerr isn't hit with a burst of requests and each card updates as it goes.
+  async function requestCollection() {
+    const missing = missingCollectionParts(state.extras?.collection);
+    for (const part of missing) {
+      await submit(part);
+    }
   }
 
   function renderSeasonGrid(item) {
@@ -614,6 +951,7 @@
       `<div class="season-body">`,
       `<div class="name">${escapeHtml(season.title)}${year ? ` (${escapeHtml(year)})` : ""}</div>`,
       `<div class="status">${escapeHtml(season.episodeCount || "?")} episodes - ${escapeHtml(status)}</div>`,
+      renderProgress(downloadsFor(show, season.seasonNumber), "tv"),
       `<button class="action${action.muted ? " muted" : ""}${action.error ? " error" : ""}" data-season-request="${payload}" ${action.disabled ? "disabled" : ""}>${escapeHtml(action.label)}</button>`,
       `</div>`,
       `</article>`
@@ -637,18 +975,26 @@
       `<div class="card-body">`,
       `<div class="name">${escapeHtml(item.title)}${item.year ? ` (${escapeHtml(item.year)})` : ""}</div>`,
       `<div class="status">${escapeHtml(item.mediaType === "tv" ? "show" : "movie")} - ${escapeHtml(status)}</div>`,
+      renderProgress(downloadsFor(item), item.mediaType),
       `</div>`,
       `</button>`,
       `<div class="card-actions">`,
-      `<button class="action${action.muted ? " muted" : ""}${action.error ? " error" : ""}" data-request="${payload}" ${action.disabled ? "disabled" : ""}>${escapeHtml(action.label)}</button>`,
+      renderOpenLink(item),
+      status === "available" && jellyfinUrl(item)
+        ? ""
+        : `<button class="action${action.muted ? " muted" : ""}${action.error ? " error" : ""}" data-request="${payload}" ${action.disabled ? "disabled" : ""}>${escapeHtml(action.label)}</button>`,
       `</div>`,
       `</article>`
     ].join("");
   }
 
+  function extraItems() {
+    return [...(state.extras?.recommendations || []), ...(state.extras?.collection?.parts || [])];
+  }
+
   function itemFromPayload(value) {
     if (state.detail?.id === value.id && state.detail?.mediaType === value.mediaType) return state.detail;
-    return state.results.find((item) => item.id === value.id && item.mediaType === value.mediaType);
+    return [...state.results, ...extraItems()].find((item) => item.id === value.id && item.mediaType === value.mediaType);
   }
 
   function bindEvents() {
@@ -712,6 +1058,11 @@
         return;
       }
 
+      if (event.target.closest("[data-request-collection]")) {
+        requestCollection();
+        return;
+      }
+
       const seasonRequest = event.target.closest("[data-season-request]");
       if (seasonRequest) {
         const payload = JSON.parse(seasonRequest.getAttribute("data-season-request"));
@@ -723,6 +1074,7 @@
       if (event.target.closest("[data-back]")) {
         state.detail = null;
         state.detailBase = null;
+        state.extras = null;
         renderBody();
         return;
       }
@@ -750,6 +1102,63 @@
     }, { passive: true });
   }
 
+  function fetchLatest(item) {
+    return apiGet(item.mediaType === "tv" ? `/Tv/${item.id}` : `/Movie/${item.id}`);
+  }
+
+  // The same title can be in the results grid and open in the detail view at once, as
+  // separate objects. Update all of them so going back to the grid shows the same thing.
+  function copiesOf(item) {
+    const copies = new Set([state.detail, state.detailBase, ...state.results, ...extraItems()]);
+    return Array.from(copies).filter((candidate) => candidate && key(candidate) === key(item));
+  }
+
+  function applyLatest(item, detail) {
+    let changed = false;
+    for (const copy of copiesOf(item)) {
+      const before = JSON.stringify([copy.mediaInfo, copy.seasons]);
+      copy.mediaInfo = detail.mediaInfo || null;
+      if (Array.isArray(copy.seasons)) copy.seasons = normalizeSeasons(detail, copy);
+      if (JSON.stringify([copy.mediaInfo, copy.seasons]) !== before) changed = true;
+    }
+
+    // Jellyseerr now has the real status, so drop the "requested" placeholders. Errors stay.
+    const prefix = key(item);
+    for (const [localKey, value] of Array.from(state.local)) {
+      if (value === "requested" && (localKey === prefix || localKey.startsWith(`${prefix}:`))) {
+        state.local.delete(localKey);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  async function refreshTitles(items) {
+    const results = await Promise.allSettled(items.map(async (item) => [item, await fetchLatest(item)]));
+    let changed = false;
+    for (const result of results) {
+      if (result.status === "fulfilled" && applyLatest(...result.value)) changed = true;
+    }
+    if (changed) renderBody();
+  }
+
+  function isInProgress(item) {
+    if (!item) return false;
+    if (downloadsFor(item).length) return true;
+    if (Array.from(state.local).some(([localKey, value]) => value === "requested" && (localKey === key(item) || localKey.startsWith(`${key(item)}:`)))) return true;
+
+    const status = item.mediaInfo?.status;
+    if (status === 2 || status === 3) return true;
+    return (item.mediaInfo?.seasons || []).some((season) => season.status === 2 || season.status === 3);
+  }
+
+  function refreshInProgress() {
+    if (document.hidden || state.loading || state.detailLoading) return;
+    const visible = state.detailBase ? [state.detail || state.detailBase, ...extraItems()] : state.results;
+    const targets = visible.filter(isInProgress).slice(0, MAX_REFRESH_PER_ROUND);
+    if (targets.length) refreshTitles(targets);
+  }
+
   function canLoadMore() {
     return Boolean(state.pageInfo && state.pageInfo.page < state.pageInfo.totalPages && !state.loading);
   }
@@ -761,4 +1170,8 @@
   bindEvents();
   renderTabs();
   loadStatus().finally(loadResults);
+  setInterval(refreshInProgress, REFRESH_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshInProgress();
+  });
 })();

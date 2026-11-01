@@ -7,10 +7,14 @@ Use the address Jellyfin can reach from the server side. This does not need to b
 Examples:
 
 ```text
-http://192.168.9.10:5055
 http://jellyseerr:5055
+http://192.168.1.50:5055
 https://jellyseerr.example.com
 ```
+
+If Jellyfin runs in Docker, don't use `localhost` or `127.0.0.1`. Inside the container those point at the Jellyfin container itself, not your server. If both apps are in the same Docker Compose stack, use the Jellyseerr service name, such as `http://jellyseerr:5055`, which keeps working if IP addresses change. Otherwise use the server's LAN IP.
+
+Use the Test Connection button to check the URL and API key before saving. It tells you whether Jellyseerr could be reached and whether it accepted the key.
 
 ## Jellyseerr API Key
 
