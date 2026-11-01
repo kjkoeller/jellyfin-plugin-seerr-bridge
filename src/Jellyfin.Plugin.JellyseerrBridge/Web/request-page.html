@@ -398,6 +398,52 @@
       color: rgba(255,255,255,.6);
       overflow-wrap: anywhere;
     }
+    .quota {
+      color: rgba(255,255,255,.78);
+    }
+    .request-line {
+      font-size: .78rem;
+      color: rgba(255,255,255,.6);
+    }
+    .request-line.problem {
+      color: #ff9b9b;
+    }
+    .action.secondary {
+      background: rgba(255,255,255,.12);
+      color: rgba(255,255,255,.9);
+    }
+    .report-form {
+      display: grid;
+      gap: .75rem;
+      max-width: 32rem;
+      padding: .9rem;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: .4rem;
+    }
+    .report-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .75rem;
+    }
+    .filter-field textarea {
+      width: 100%;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: .35rem;
+      background: #242424;
+      color: rgba(255,255,255,.92);
+      padding: .55rem .65rem;
+      font: inherit;
+      resize: vertical;
+    }
+    .report-error {
+      color: #ff9b9b;
+      font-size: .88rem;
+    }
+    .report-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .5rem;
+    }
     .status-note {
       font-size: .85rem;
       color: rgba(255,255,255,.65);
@@ -481,6 +527,7 @@
         <button id="detailBack" class="back detail-back" data-back="true" type="button" aria-label="Back to request results" hidden>&#8592;</button>
         <h1>Request</h1>
         <div class="meta" id="status">Search and discover media from Jellyseerr without leaving Jellyfin.</div>
+        <div class="meta quota" id="quota" role="status" hidden></div>
       </div>
       <div class="search-row">
         <input id="search" class="search" type="search" placeholder="Search movies and shows" autocomplete="off" spellcheck="false">
@@ -545,6 +592,6 @@
     <section id="results"></section>
     <div class="footer" id="footer"></div>
   </main>
-  <script src="/JellyseerrBridge/Assets/request-page.js?v=0.2.7.0"></script>
+  <script src="/JellyseerrBridge/Assets/request-page.js?v=0.3.0.0"></script>
 </body>
 </html>

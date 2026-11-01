@@ -22,6 +22,25 @@ Create or copy the API key from Jellyseerr Settings. The key is stored in Jellyf
 
 Browsers call the Jellyfin plugin endpoints. They do not receive the Jellyseerr API key.
 
+## Users, Approval and Request Limits
+
+Since 0.3.0, requests go to Jellyseerr under the person who made them, not under the Jellyseerr admin. The plugin still uses the admin API key, but tells Jellyseerr which user each request is for. That means Jellyseerr's per-user settings apply: who has to wait for approval, request limits, and who can report problems.
+
+The first time someone requests something, the plugin finds their Jellyseerr account by their Jellyfin user ID. If they don't have one, it imports them from Jellyfin automatically. New accounts get Jellyseerr's default permissions.
+
+### Keeping requests auto-approved
+
+Before 0.3.0, everything was auto-approved because it went in as the admin. To keep it that way for everyone, set this up in Jellyseerr:
+
+1. **For new users:** go to Settings, Users and tick **Auto-Approve** under Default Permissions. This also covers users the plugin imports. Make sure **Request** and **Report Issues** are ticked too.
+2. **For existing users:** go to Users, tick the box at the top of the list to select everyone, choose **Bulk Edit**, tick **Auto-Approve**, and save.
+
+To approve some people's requests yourself instead, leave Auto-Approve off for them. Their requests show as Pending approval on the Requests page until you approve them in Jellyseerr.
+
+### Request limits
+
+Limits set in Jellyseerr, under Default Permissions or on a user's settings, show at the top of the Requests page, for example "3 of 5 movie requests left this week". Once someone reaches their limit, Jellyseerr turns down new requests until it resets.
+
 ## Request Submission
 
 Requests are disabled by default. Enable `Enable Request Submission` after confirming the Jellyseerr URL and API key are correct.

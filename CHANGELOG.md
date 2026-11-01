@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.3.0.0
+
+Requests now belong to the person who made them, with a My Requests tab, request limits and problem reports built on that.
+
+Upgrade note: requests used to go to Jellyseerr as the admin, so they were always auto-approved. Now Jellyseerr's per-user settings apply. To keep everything auto-approved, see "Users, Approval and Request Limits" in CONFIGURATION.md.
+
+Changes:
+
+- Requests go to Jellyseerr under the Jellyfin user who made them. The plugin keeps using the admin API key and tells Jellyseerr who each request is for, so per-user approval rules and request limits apply, and requests show the right name in Jellyseerr.
+- The plugin finds each person's Jellyseerr account by their Jellyfin user ID. If they don't have one, it imports them from Jellyfin the first time they request something.
+- New My Requests tab listing the signed-in user's own requests, newest first, with each title's status and download progress. Declined requests, and ones that couldn't be sent for download, are marked in red.
+- Request limits set in Jellyseerr now show at the top of the Requests page, for example "3 of 5 movie requests left this week". They're checked again after each request.
+- Titles in the library get a Report a problem button on their detail page. Reports go to Jellyseerr's issue tracker under the person reporting, with the kind of problem, a description, and for shows the season and episode.
+- The allowed users setting now matches IDs whether they're pasted with or without dashes.
+- Requests no longer pick a Radarr or Sonarr server, quality profile or folder themselves. Jellyseerr uses its default server, which it does anyway when none is given, and it doesn't let regular users choose those.
+
+## 0.2.10.0
+
+Flags requests that were approved a while ago but still aren't downloading.
+
+Changes:
+
+- If a title has been approved for more than 30 minutes and nothing is downloading, its detail page now says how long ago it was approved and that Radarr or Sonarr may not have found a copy yet, or that the download may have finished without Jellyfin picking it up. Before, it said "waiting" indefinitely.
+- Titles that are actively downloading don't get the note, since their progress bar already shows what's happening.
+
+## 0.2.9.0
+
+Fixes the Test Connection button and has it check Jellyseerr's Radarr and Sonarr setup.
+
+Changes:
+
+- Fixed Test Connection always failing with "Jellyfin answered with HTTP response.status". Jellyfin Web replaces anything written like `${...}` in a plugin's settings page with a translation, which wiped out the sign-in token the button was sending. The settings page script no longer uses that syntax.
+- Test Connection now also looks at the Radarr and Sonarr servers set up in Jellyseerr. It warns when Enable Scan is off for one of them, since download progress can't show without it, and when no Radarr or Sonarr server is set up at all. Warnings don't fail the test.
+
 ## 0.2.8.0
 
 Request missing seasons straight from a show's page in Jellyfin.

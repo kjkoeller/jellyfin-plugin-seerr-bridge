@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -49,37 +50,6 @@ public sealed class BridgeRequest
 }
 
 /// <summary>
-/// Sanitized Jellyseerr service defaults.
-/// </summary>
-public sealed class ServiceDefaults
-{
-    /// <summary>
-    /// Gets or sets the service ID.
-    /// </summary>
-    public int? ServerId { get; set; }
-
-    /// <summary>
-    /// Gets or sets the quality profile ID.
-    /// </summary>
-    public int? ProfileId { get; set; }
-
-    /// <summary>
-    /// Gets or sets the root folder.
-    /// </summary>
-    public string? RootFolder { get; set; }
-
-    /// <summary>
-    /// Gets or sets tags.
-    /// </summary>
-    public JsonElement? Tags { get; set; }
-
-    /// <summary>
-    /// Gets or sets the language profile ID.
-    /// </summary>
-    public int? LanguageProfileId { get; set; }
-}
-
-/// <summary>
 /// The Jellyseerr URL and API key to test from the settings page.
 /// </summary>
 public sealed class ConnectionTestRequest
@@ -113,4 +83,47 @@ public sealed class ConnectionTestResult
     /// </summary>
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets setup problems found in Jellyseerr that don't stop the connection
+    /// working, such as Enable Scan being off for a Radarr or Sonarr server.
+    /// </summary>
+    [JsonPropertyName("warnings")]
+    public IReadOnlyList<string> Warnings { get; set; } = [];
+}
+
+/// <summary>
+/// A problem report for a title in the library.
+/// </summary>
+public sealed class BridgeIssue
+{
+    /// <summary>
+    /// Gets or sets Jellyseerr's own media ID for the title (mediaInfo.id), not the TMDB ID.
+    /// </summary>
+    [JsonPropertyName("mediaInfoId")]
+    public int MediaInfoId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the kind of problem: 1 video, 2 audio, 3 subtitles, 4 other.
+    /// </summary>
+    [JsonPropertyName("issueType")]
+    public int IssueType { get; set; }
+
+    /// <summary>
+    /// Gets or sets the description of the problem.
+    /// </summary>
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    /// <summary>
+    /// Gets or sets the season with the problem. 0 means all seasons, or a movie.
+    /// </summary>
+    [JsonPropertyName("problemSeason")]
+    public int ProblemSeason { get; set; }
+
+    /// <summary>
+    /// Gets or sets the episode with the problem. 0 means all episodes, or a movie.
+    /// </summary>
+    [JsonPropertyName("problemEpisode")]
+    public int ProblemEpisode { get; set; }
 }
