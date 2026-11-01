@@ -19,8 +19,8 @@
           </div>
 
           <div class="inputContainer">
-            <input is="emby-input" id="JellyseerrApiKey" type="password" label="Jellyseerr API Key" autocomplete="off">
-            <div class="fieldDescription">Stored server-side by Jellyfin. It is not sent to browsers by plugin endpoints.</div>
+            <input is="emby-input" id="JellyseerrApiKey" type="password" label="Jellyseerr API Key" autocomplete="new-password">
+            <div class="fieldDescription" id="JellyseerrApiKeyDescription">Stored on the Jellyfin server and only used there. Once saved, it isn't shown again: leave this blank to keep the saved key, or type a new one to replace it.</div>
           </div>
 
           <div class="inputContainer">
@@ -41,9 +41,15 @@
             <span>Enable 4K requests</span>
           </label>
 
+          <label class="checkboxContainer">
+            <input is="emby-checkbox" type="checkbox" id="AutoAddUsersToJellyseerr">
+            <span>Add Jellyfin users to Jellyseerr automatically</span>
+          </label>
+          <div class="fieldDescription checkboxFieldDescription">When someone without a Jellyseerr account makes their first request, import them from Jellyfin with Jellyseerr's default permissions. Turn this off to choose who gets an account yourself, in Jellyseerr under Users, Import Jellyfin Users.</div>
+
           <div class="inputContainer">
             <textarea is="emby-textarea" id="AllowedUserIds" label="Allowed Jellyfin User IDs"></textarea>
-            <div class="fieldDescription">Optional. One Jellyfin user ID per line. Empty allows any authenticated Jellyfin user to submit requests.</div>
+            <div class="fieldDescription">Optional. One Jellyfin user ID per line. Only these users can request titles or report problems. Leave empty to allow every signed-in Jellyfin user.</div>
           </div>
 
           <div>
@@ -64,7 +70,12 @@
           Dashboard.showLoadingMsg();
           ApiClient.getPluginConfiguration(pluginId).then((config) => {
             page.querySelector("#JellyseerrBaseUrl").value = config.JellyseerrBaseUrl || "";
-            page.querySelector("#JellyseerrApiKey").value = config.JellyseerrApiKey || "";
+            // The saved key is never put back in the form, so it can't be read off the screen
+            // or picked up by a password manager.
+            const keyInput = page.querySelector("#JellyseerrApiKey");
+            keyInput.value = "";
+            keyInput.placeholder = config.JellyseerrApiKey ? "Saved. Leave blank to keep it." : "";
+            page.querySelector("#AutoAddUsersToJellyseerr").checked = config.AutoAddUsersToJellyseerr !== false;
             page.querySelector("#EnableRequestSubmission").checked = !!config.EnableRequestSubmission;
             page.querySelector("#Enable4KRequests").checked = !!config.Enable4KRequests;
             page.querySelector("#AllowedUserIds").value = (config.AllowedUserIds || []).join("\n");
@@ -131,7 +142,11 @@
           Dashboard.showLoadingMsg();
           ApiClient.getPluginConfiguration(pluginId).then((config) => {
             config.JellyseerrBaseUrl = page.querySelector("#JellyseerrBaseUrl").value.trim();
-            config.JellyseerrApiKey = page.querySelector("#JellyseerrApiKey").value.trim();
+            const newKey = page.querySelector("#JellyseerrApiKey").value.trim();
+            if (newKey) {
+              config.JellyseerrApiKey = newKey;
+            }
+            config.AutoAddUsersToJellyseerr = page.querySelector("#AutoAddUsersToJellyseerr").checked;
             config.EnableRequestSubmission = page.querySelector("#EnableRequestSubmission").checked;
             config.Enable4KRequests = page.querySelector("#Enable4KRequests").checked;
             config.AllowedUserIds = page.querySelector("#AllowedUserIds").value
@@ -140,6 +155,11 @@
               .filter(Boolean);
             return ApiClient.updatePluginConfiguration(pluginId, config);
           }).then(() => {
+            const keyInput = page.querySelector("#JellyseerrApiKey");
+            if (keyInput.value.trim()) {
+              keyInput.value = "";
+              keyInput.placeholder = "Saved. Leave blank to keep it.";
+            }
             Dashboard.processPluginConfigurationUpdateResult();
           });
           return false;

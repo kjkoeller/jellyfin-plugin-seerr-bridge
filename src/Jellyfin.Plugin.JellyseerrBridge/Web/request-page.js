@@ -74,11 +74,27 @@
     footer: document.getElementById("footer")
   };
 
+  // Jellyfin Web can remember several servers. Only send this server's own sign-in token, so a
+  // token for another server never goes to this one. If there's just one saved server, it's
+  // this one even when it was saved under a different address (LAN IP versus domain, say).
+  function serverForThisPage(servers) {
+    const signedIn = servers.filter((server) => server.AccessToken);
+    const isThisServer = (address) => {
+      try {
+        return Boolean(address) && new URL(address).origin === window.location.origin;
+      } catch {
+        return false;
+      }
+    };
+    return signedIn.find((server) => [server.ManualAddress, server.LocalAddress, server.RemoteAddress].some(isThisServer))
+      || (signedIn.length === 1 ? signedIn[0] : null);
+  }
+
   function authHeader() {
     try {
       const raw = localStorage.getItem("jellyfin_credentials");
       const credentials = raw ? JSON.parse(raw) : null;
-      const server = credentials?.Servers?.find((item) => item.AccessToken) || credentials?.Servers?.[0];
+      const server = serverForThisPage(credentials?.Servers || []);
       const token = server?.AccessToken;
       if (!token) return {};
       return {

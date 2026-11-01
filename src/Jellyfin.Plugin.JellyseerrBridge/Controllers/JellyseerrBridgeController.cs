@@ -225,6 +225,7 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
     [AllowAnonymous]
     public IActionResult Page()
     {
+        AddPageSecurityHeaders();
         return EmbeddedFile("Web.request-page.html", "text/html; charset=utf-8");
     }
 
@@ -264,10 +265,15 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
             return Task.FromResult<IActionResult>(BadRequest(new { message = "Query is required." }));
         }
 
+        if (query.Length > MaxSearchLength)
+        {
+            return Task.FromResult<IActionResult>(BadRequest(new { message = "That search is too long." }));
+        }
+
         return ForwardGetAsync("/api/v1/search", new Dictionary<string, string?>
         {
-            ["query"] = query,
-            ["page"] = Math.Max(page, 1).ToString(CultureInfo.InvariantCulture)
+            ["query"] = query.Trim(),
+            ["page"] = ClampPage(page).ToString(CultureInfo.InvariantCulture)
         }, cancellationToken);
     }
 
@@ -298,7 +304,7 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
 
         var query = new Dictionary<string, string?>
         {
-            ["page"] = Math.Max(page, 1).ToString(CultureInfo.InvariantCulture)
+            ["page"] = ClampPage(page).ToString(CultureInfo.InvariantCulture)
         };
 
         if (!endpoint.Equals("/api/v1/discover/trending", StringComparison.Ordinal))
@@ -311,28 +317,16 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
 
     private void AddAllowedDiscoverFilters(IDictionary<string, string?> query)
     {
-        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "sortBy",
-            "primaryReleaseDateGte",
-            "primaryReleaseDateLte",
-            "firstAirDateGte",
-            "firstAirDateLte",
-            "voteAverageGte",
-            "voteAverageLte",
-            "watchRegion",
-            "watchProviders"
-        };
-
         foreach (var pair in ControllerContext.HttpContext.Request.Query)
         {
-            if (!allowed.Contains(pair.Key))
+            // Unknown filters, and known ones with values that don't look right, are dropped.
+            if (!DiscoverFilterPatterns.TryGetValue(pair.Key, out var pattern))
             {
                 continue;
             }
 
             var value = pair.Value.ToString();
-            if (!string.IsNullOrWhiteSpace(value))
+            if (value.Length <= 200 && pattern.IsMatch(value))
             {
                 query[pair.Key] = value;
             }
@@ -437,7 +431,7 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
     {
         return new Dictionary<string, string?>
         {
-            ["page"] = Math.Max(page, 1).ToString(CultureInfo.InvariantCulture)
+            ["page"] = ClampPage(page).ToString(CultureInfo.InvariantCulture)
         };
     }
 
@@ -458,7 +452,13 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
 
         if (!IsUserAllowed(config))
         {
-            return Forbid();
+            return StatusCode(403, new { message = "Your account isn't allowed to request titles. Ask an admin if you think it should be." });
+        }
+
+        // Generous enough for requesting a whole film collection at once.
+        if (RateLimit("request", 30, TimeSpan.FromMinutes(10)) is IActionResult tooMany)
+        {
+            return tooMany;
         }
 
         var validation = ValidateRequest(request, config);
@@ -548,7 +548,7 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
         {
-            return StatusCode(502, new { message = ex.Message });
+            return JellyseerrFailed(ex, path);
         }
     }
 
@@ -563,13 +563,43 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
         }
         catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
         {
-            return StatusCode(502, new { message = ex.Message });
+            return JellyseerrFailed(ex, path);
         }
     }
 
-    private static async Task<IActionResult> ProxyResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private IActionResult JellyseerrFailed(Exception ex, string path)
+    {
+        if (ex is InvalidOperationException && GetConfig() is var config && (TryCreateBaseUri(config) is null || string.IsNullOrWhiteSpace(config.JellyseerrApiKey)))
+        {
+            return StatusCode(502, new { message = "Jellyseerr Bridge isn't set up yet. Ask an admin to add the Jellyseerr URL and API key." });
+        }
+
+        if (ex is TaskCanceledException && HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // The browser gave up (the user navigated away), so there's no one to tell.
+            return StatusCode(499);
+        }
+
+        _logger.LogWarning(ex, "Jellyseerr call to {Path} failed", path);
+        return StatusCode(502, new { message = JellyseerrUnavailableMessage });
+    }
+
+    private async Task<IActionResult> ProxyResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        if ((int)response.StatusCode >= 500)
+        {
+            // Jellyseerr's own failures can include internal details, so log them and send
+            // users a plain message. Its 4xx answers (already requested, over the limit and
+            // so on) are meant for users and pass through as they are.
+            _logger.LogWarning(
+                "Jellyseerr answered {Path} with HTTP {StatusCode}: {Body}",
+                response.RequestMessage?.RequestUri?.AbsolutePath,
+                (int)response.StatusCode,
+                body.Length > 500 ? body[..500] : body);
+            return StatusCode(502, new { message = JellyseerrUnavailableMessage });
+        }
+
         return new ContentResult
         {
             StatusCode = (int)response.StatusCode,
@@ -681,6 +711,7 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
     private IActionResult EmbeddedFile(string resourceSuffix, string contentType)
     {
         Response.Headers.CacheControl = "no-store, max-age=0";
+        Response.Headers.XContentTypeOptions = "nosniff";
         Response.Headers.Pragma = "no-cache";
         Response.Headers.Expires = "0";
 
