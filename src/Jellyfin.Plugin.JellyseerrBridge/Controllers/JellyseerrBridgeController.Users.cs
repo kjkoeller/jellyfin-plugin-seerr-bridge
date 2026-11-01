@@ -11,6 +11,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.JellyseerrBridge.Models;
+using Jellyfin.Plugin.JellyseerrBridge.Privacy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 
@@ -380,6 +381,9 @@ public sealed partial class JellyseerrBridgeController
         {
             details.Remove(bulky);
         }
+
+        // Same cleaning as every other Jellyseerr answer; the request summary below is ours.
+        SeerrResponseSanitizer.Sanitize(details);
 
         details["mediaType"] = mediaType;
         details["bridgeRequest"] = new JsonObject
