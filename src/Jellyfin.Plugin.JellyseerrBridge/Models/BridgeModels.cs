@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -113,4 +114,11 @@ public sealed class ConnectionTestResult
     /// </summary>
     [JsonPropertyName("message")]
     public string Message { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets setup problems found in Jellyseerr that don't stop the connection
+    /// working, such as Enable Scan being off for a Radarr or Sonarr server.
+    /// </summary>
+    [JsonPropertyName("warnings")]
+    public IReadOnlyList<string> Warnings { get; set; } = [];
 }

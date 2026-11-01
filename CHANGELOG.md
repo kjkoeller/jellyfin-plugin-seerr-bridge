@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.9.0
+
+Fixes the Test Connection button and has it check Jellyseerr's Radarr and Sonarr setup.
+
+Changes:
+
+- Fixed Test Connection always failing with "Jellyfin answered with HTTP response.status". Jellyfin Web replaces anything written like `${...}` in a plugin's settings page with a translation, which wiped out the sign-in token the button was sending. The settings page script no longer uses that syntax.
+- Test Connection now also looks at the Radarr and Sonarr servers set up in Jellyseerr. It warns when Enable Scan is off for one of them, since download progress can't show without it, and when no Radarr or Sonarr server is set up at all. Warnings don't fail the test.
+
 ## 0.2.8.0
 
 Request missing seasons straight from a show's page in Jellyfin.

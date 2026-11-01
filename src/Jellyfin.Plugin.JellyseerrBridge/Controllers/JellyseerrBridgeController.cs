@@ -124,11 +124,66 @@ public sealed class JellyseerrBridgeController : ControllerBase
             return TestFailed($"Reached {jellyseerrName}, but the connection dropped while checking the API key: {ex.Message}");
         }
 
+        var warnings = new List<string>();
+        await AddServiceWarningsAsync(client, "/api/v1/settings/radarr", "Radarr", "movie", warnings, cancellationToken).ConfigureAwait(false);
+        await AddServiceWarningsAsync(client, "/api/v1/settings/sonarr", "Sonarr", "show", warnings, cancellationToken).ConfigureAwait(false);
+
         return new ConnectionTestResult
         {
             Success = true,
-            Message = $"Connected to {jellyseerrName} and the API key works. Remember to save."
+            Message = warnings.Count == 0
+                ? $"Connected to {jellyseerrName} and the API key works. Remember to save."
+                : $"Connected to {jellyseerrName} and the API key works, but a few Jellyseerr settings need a look:",
+            Warnings = warnings
         };
+    }
+
+    /// <summary>
+    /// Looks at Jellyseerr's Radarr or Sonarr servers for setup problems that would quietly
+    /// break things on the request page. Nothing here fails the test; it only adds warnings.
+    /// </summary>
+    private static async Task AddServiceWarningsAsync(HttpClient client, string endpoint, string serviceName, string mediaWord, List<string> warnings, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await client.GetAsync(endpoint, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+
+            var servers = document.RootElement.EnumerateArray().Where(server => server.ValueKind == JsonValueKind.Object).ToList();
+            if (servers.Count == 0)
+            {
+                warnings.Add($"No {serviceName} server is set up in Jellyseerr, so {mediaWord} requests won't be downloaded.");
+                return;
+            }
+
+            foreach (var server in servers)
+            {
+                // "syncEnabled" is the Enable Scan switch. Without it Jellyseerr doesn't watch
+                // the download queue, so the request page can't show download progress.
+                if (ReadBool(server, "syncEnabled"))
+                {
+                    continue;
+                }
+
+                var name = ReadString(server, "name");
+                var label = string.IsNullOrWhiteSpace(name) ? serviceName : $"{serviceName} server \"{name}\"";
+                warnings.Add($"Enable Scan is off for {label}, so download progress won't show for {mediaWord}s it handles. Turn it on in Jellyseerr under Settings, Services.");
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            // These checks are extras. If they can't run, the connection test itself still stands.
+        }
     }
 
     private static ConnectionTestResult TestFailed(string message)

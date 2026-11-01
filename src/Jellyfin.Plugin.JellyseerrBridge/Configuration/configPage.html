@@ -73,18 +73,41 @@
         });
 
         // Tests whatever is typed in the form right now, so you can check it before saving.
+        // Note: Jellyfin Web treats anything written like a JS template placeholder in this
+        // page as a translation key and replaces it, so this script sticks to plain "+" joins.
         const testButton = page.querySelector("#TestConnection");
         const testResult = page.querySelector("#TestConnectionResult");
+
+        function showTestResult(message, color, warnings) {
+          testResult.textContent = "";
+          const line = document.createElement("div");
+          line.textContent = message;
+          line.style.color = color;
+          testResult.appendChild(line);
+
+          if (warnings && warnings.length) {
+            const list = document.createElement("ul");
+            list.style.margin = ".4em 0 0";
+            list.style.paddingLeft = "1.2em";
+            list.style.color = "#e5a00d";
+            warnings.forEach((warning) => {
+              const item = document.createElement("li");
+              item.textContent = warning;
+              list.appendChild(item);
+            });
+            testResult.appendChild(list);
+          }
+        }
+
         testButton.addEventListener("click", async () => {
           testButton.disabled = true;
-          testResult.style.color = "";
-          testResult.textContent = "Testing...";
+          showTestResult("Testing...", "");
           try {
             const response = await fetch(ApiClient.getUrl("JellyseerrBridge/TestConnection"), {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                Authorization: `MediaBrowser Token="${ApiClient.accessToken()}"`
+                "Authorization": "MediaBrowser Token=\"" + ApiClient.accessToken() + "\""
               },
               body: JSON.stringify({
                 baseUrl: page.querySelector("#JellyseerrBaseUrl").value.trim(),
@@ -92,14 +115,12 @@
               })
             });
             if (!response.ok) {
-              throw new Error(`Jellyfin answered with HTTP ${response.status}. Is the plugin updated and Jellyfin restarted?`);
+              throw new Error("Jellyfin answered with HTTP " + response.status + ". Is the plugin updated and Jellyfin restarted?");
             }
             const result = await response.json();
-            testResult.textContent = result.message;
-            testResult.style.color = result.success ? "#52b54b" : "#cc3333";
+            showTestResult(result.message, result.success ? "#52b54b" : "#cc3333", result.warnings);
           } catch (error) {
-            testResult.textContent = error.message;
-            testResult.style.color = "#cc3333";
+            showTestResult(error.message, "#cc3333");
           } finally {
             testButton.disabled = false;
           }

@@ -6,7 +6,7 @@
   if (window.__jellyseerrBridgeEntryLoaded) return;
   window.__jellyseerrBridgeEntryLoaded = true;
 
-  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.2.8.0";
+  const REQUEST_URL = "/JellyseerrBridge/Page?v=0.2.9.0";
   const STYLE_ID = "jellyseerr-bridge-request-entry-style";
 
   // Same plus-in-a-circle icon as the side menu entry, drawn as an SVG for the
