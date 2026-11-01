@@ -5,6 +5,17 @@
     "description": "A Jellyfin plugin that provides a Jellyseerr-powered request page with server-side API-key forwarding.",
     "versions": [
       {
+        "version": "0.3.0.0",
+        "changelog": "Requests now belong to the person who made them, with a My Requests tab, request limits and problem reports built on that.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/kjkoeller/jellyfin-plugin-seerr-bridge/releases/download/v0.3.0/JellyseerrBridge_0.3.0.0.zip",
+        "checksum": "e07ea5e8a6d044fbde529c2d1ca787ae",
+        "timestamp": "2026-11-01T12:29:09Z",
+        "repositoryName": "Jellyseerr Bridge",
+        "repositoryUrl": "https://raw.githubusercontent.com/kjkoeller/jellyfin-plugin-seerr-bridge/main/manifest.json",
+        "url": "https://github.com/kjkoeller/jellyfin-plugin-seerr-bridge/releases/download/v0.3.0/JellyseerrBridge_0.3.0.0.zip"
+      },
+      {
         "version": "0.2.8.0",
         "changelog": "Request missing seasons straight from a show's page in Jellyfin.",
         "targetAbi": "12.0.0.0",
