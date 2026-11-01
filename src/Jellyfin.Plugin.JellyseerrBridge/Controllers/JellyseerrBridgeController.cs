@@ -14,6 +14,7 @@ using Jellyfin.Plugin.JellyseerrBridge.Configuration;
 using Jellyfin.Plugin.JellyseerrBridge.Models;
 using MediaBrowser.Common.Net;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.Logging;
@@ -305,6 +306,84 @@ public sealed class JellyseerrBridgeController : ControllerBase
     public Task<IActionResult> Tv(int tmdbId, CancellationToken cancellationToken)
     {
         return ForwardGetAsync($"/api/v1/tv/{tmdbId}", new Dictionary<string, string?>(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Proxies Rotten Tomatoes and IMDb ratings for a movie.
+    /// </summary>
+    /// <param name="tmdbId">TMDB movie ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Jellyseerr response.</returns>
+    [HttpGet("Movie/{tmdbId:int}/Ratings")]
+    public async Task<IActionResult> MovieRatings(int tmdbId, CancellationToken cancellationToken)
+    {
+        // The combined endpoint has both Rotten Tomatoes and IMDb. Older Jellyseerr versions
+        // don't have it, so fall back to the Rotten Tomatoes only one.
+        var combined = await ForwardGetAsync($"/api/v1/movie/{tmdbId}/ratingscombined", new Dictionary<string, string?>(), cancellationToken).ConfigureAwait(false);
+        if (combined is ContentResult { StatusCode: StatusCodes.Status404NotFound })
+        {
+            return await ForwardGetAsync($"/api/v1/movie/{tmdbId}/ratings", new Dictionary<string, string?>(), cancellationToken).ConfigureAwait(false);
+        }
+
+        return combined;
+    }
+
+    /// <summary>
+    /// Proxies Rotten Tomatoes ratings for a show.
+    /// </summary>
+    /// <param name="tmdbId">TMDB TV ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Jellyseerr response.</returns>
+    [HttpGet("Tv/{tmdbId:int}/Ratings")]
+    public Task<IActionResult> TvRatings(int tmdbId, CancellationToken cancellationToken)
+    {
+        return ForwardGetAsync($"/api/v1/tv/{tmdbId}/ratings", new Dictionary<string, string?>(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Proxies titles similar to a movie.
+    /// </summary>
+    /// <param name="tmdbId">TMDB movie ID.</param>
+    /// <param name="page">Page number.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Jellyseerr response.</returns>
+    [HttpGet("Movie/{tmdbId:int}/Recommendations")]
+    public Task<IActionResult> MovieRecommendations(int tmdbId, [FromQuery] int page = 1, CancellationToken cancellationToken = default)
+    {
+        return ForwardGetAsync($"/api/v1/movie/{tmdbId}/recommendations", PageQuery(page), cancellationToken);
+    }
+
+    /// <summary>
+    /// Proxies titles similar to a show.
+    /// </summary>
+    /// <param name="tmdbId">TMDB TV ID.</param>
+    /// <param name="page">Page number.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Jellyseerr response.</returns>
+    [HttpGet("Tv/{tmdbId:int}/Recommendations")]
+    public Task<IActionResult> TvRecommendations(int tmdbId, [FromQuery] int page = 1, CancellationToken cancellationToken = default)
+    {
+        return ForwardGetAsync($"/api/v1/tv/{tmdbId}/recommendations", PageQuery(page), cancellationToken);
+    }
+
+    /// <summary>
+    /// Proxies a movie collection, such as every film in a series, with each film's status.
+    /// </summary>
+    /// <param name="collectionId">TMDB collection ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Jellyseerr response.</returns>
+    [HttpGet("Collection/{collectionId:int}")]
+    public Task<IActionResult> Collection(int collectionId, CancellationToken cancellationToken)
+    {
+        return ForwardGetAsync($"/api/v1/collection/{collectionId}", new Dictionary<string, string?>(), cancellationToken);
+    }
+
+    private static Dictionary<string, string?> PageQuery(int page)
+    {
+        return new Dictionary<string, string?>
+        {
+            ["page"] = Math.Max(page, 1).ToString(CultureInfo.InvariantCulture)
+        };
     }
 
     /// <summary>

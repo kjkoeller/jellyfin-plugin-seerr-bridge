@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.7.0
+
+Richer detail pages, and a way back into Jellyfin once something's in the library.
+
+Changes:
+
+- Titles in the library get an Open in Jellyfin button on their card and detail page. Shows that are only partly in the library keep their Request button as well.
+- The detail page says when a title was last requested. If that request was declined, or couldn't be sent to Radarr or Sonarr, it says so instead of quietly showing the title as not available again.
+- Detail pages show IMDb and Rotten Tomatoes ratings alongside the TMDB score, linking to the rating sites.
+- Detail pages show the main cast.
+- Movies that belong to a collection list every film in it, oldest first, with a button that requests all the missing ones.
+- Detail pages end with a row of similar titles, each with its own status and request button.
+- New plugin endpoints for ratings, similar titles and collections. They only pass through to the matching Jellyseerr endpoints, like the existing ones. Ratings fall back to Rotten Tomatoes only on Jellyseerr versions without IMDb support.
+
+## 0.2.6.0
+
+Shows where each request stands, including download progress, on the request page.
+
+Changes:
+
+- Titles now show Pending approval, Approved, Downloading, Partially available or Available, instead of one "Requested" label for everything in between.
+- While a movie or episode is downloading, its card and detail page show a progress bar with the percentage and time left. Shows list how many episodes are downloading, and each season shows its own progress.
+- Anything waiting or downloading is re-checked every 30 seconds while the page is open, so progress updates without a reload. Checks pause while the browser tab is in the background.
+- After a request is sent, the page looks up its real status from Jellyseerr, so auto-approved requests show as approved or downloading straight away.
+- The detail page explains what Pending approval and Approved mean.
+- Progress comes from Jellyseerr, which checks Radarr and Sonarr about once a minute, so it can lag slightly behind the download client.
+
 ## 0.2.5.0
 
 Security and reliability fixes, plus a connection test on the settings page.
