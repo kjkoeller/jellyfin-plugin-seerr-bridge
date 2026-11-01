@@ -8,7 +8,7 @@ namespace Jellyfin.Plugin.JellyseerrBridge.Configuration;
 public sealed class PluginConfiguration : BasePluginConfiguration
 {
     /// <summary>
-    /// Gets or sets the Jellyseerr base URL, for example http://192.168.9.10:5055.
+    /// Gets or sets the Jellyseerr base URL, for example http://jellyseerr:5055.
     /// </summary>
     public string JellyseerrBaseUrl { get; set; } = string.Empty;
 

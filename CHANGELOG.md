@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.5.0
+
+Security and reliability fixes, plus a connection test on the settings page.
+
+Changes:
+
+- `/JellyseerrBridge/Status` now needs a signed-in Jellyfin user and no longer returns the Jellyseerr host, so an internet-facing server doesn't reveal internal addresses to anyone who asks.
+- Calls to Jellyseerr now go through Jellyfin's shared HTTP client factory instead of creating a new HttpClient each time, which avoids running out of sockets under load.
+- If Jellyseerr's Radarr or Sonarr settings come back in an unexpected shape, requests are sent without the default server and profile instead of failing with an error. The problem is logged as a warning.
+- New Test Connection button on the settings page. It checks the URL and API key typed in the form, before saving, and explains the common Docker `localhost` mistake when it happens.
+- The settings page and docs now suggest `http://jellyseerr:5055` instead of an IP address, with a note about `localhost` in Docker.
+
 ## 0.2.4.0
 
 The plugin now adds the Request tab to Jellyfin Web by itself. No index.html edit or extra plugin is needed.

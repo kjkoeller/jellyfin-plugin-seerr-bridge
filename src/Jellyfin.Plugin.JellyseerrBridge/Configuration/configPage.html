@@ -14,13 +14,20 @@
           </div>
 
           <div class="inputContainer">
-            <input is="emby-input" id="JellyseerrBaseUrl" label="Jellyseerr Base URL" placeholder="http://192.168.9.10:5055">
-            <div class="fieldDescription">The internal Jellyseerr URL reachable from the Jellyfin server.</div>
+            <input is="emby-input" id="JellyseerrBaseUrl" label="Jellyseerr Base URL" placeholder="http://jellyseerr:5055">
+            <div class="fieldDescription">The address the Jellyfin server uses to reach Jellyseerr, including the port. If Jellyfin runs in Docker, don't use localhost: inside the container it means Jellyfin itself. Use the Jellyseerr container name (for example http://jellyseerr:5055) or the server's LAN IP.</div>
           </div>
 
           <div class="inputContainer">
             <input is="emby-input" id="JellyseerrApiKey" type="password" label="Jellyseerr API Key" autocomplete="off">
             <div class="fieldDescription">Stored server-side by Jellyfin. It is not sent to browsers by plugin endpoints.</div>
+          </div>
+
+          <div class="inputContainer">
+            <button is="emby-button" type="button" id="TestConnection" class="raised block">
+              <span>Test Connection</span>
+            </button>
+            <div id="TestConnectionResult" class="fieldDescription" role="status" aria-live="polite"></div>
           </div>
 
           <label class="checkboxContainer">
@@ -63,6 +70,39 @@
             page.querySelector("#AllowedUserIds").value = (config.AllowedUserIds || []).join("\n");
             Dashboard.hideLoadingMsg();
           });
+        });
+
+        // Tests whatever is typed in the form right now, so you can check it before saving.
+        const testButton = page.querySelector("#TestConnection");
+        const testResult = page.querySelector("#TestConnectionResult");
+        testButton.addEventListener("click", async () => {
+          testButton.disabled = true;
+          testResult.style.color = "";
+          testResult.textContent = "Testing...";
+          try {
+            const response = await fetch(ApiClient.getUrl("JellyseerrBridge/TestConnection"), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `MediaBrowser Token="${ApiClient.accessToken()}"`
+              },
+              body: JSON.stringify({
+                baseUrl: page.querySelector("#JellyseerrBaseUrl").value.trim(),
+                apiKey: page.querySelector("#JellyseerrApiKey").value.trim()
+              })
+            });
+            if (!response.ok) {
+              throw new Error(`Jellyfin answered with HTTP ${response.status}. Is the plugin updated and Jellyfin restarted?`);
+            }
+            const result = await response.json();
+            testResult.textContent = result.message;
+            testResult.style.color = result.success ? "#52b54b" : "#cc3333";
+          } catch (error) {
+            testResult.textContent = error.message;
+            testResult.style.color = "#cc3333";
+          } finally {
+            testButton.disabled = false;
+          }
         });
 
         form.addEventListener("submit", (event) => {

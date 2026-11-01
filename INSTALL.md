@@ -77,8 +77,10 @@ Open Jellyfin Dashboard -> Plugins -> Jellyseerr Bridge.
 
 Set:
 
-- `Jellyseerr Base URL`: the URL reachable from the Jellyfin server, such as `http://192.168.9.10:5055`.
+- `Jellyseerr Base URL`: the URL reachable from the Jellyfin server, such as `http://jellyseerr:5055`. On Docker, don't use `localhost`; see [CONFIGURATION.md](CONFIGURATION.md).
 - `Jellyseerr API Key`: from Jellyseerr Settings.
+
+Click Test Connection to check both before saving.
 - `Enable Request Submission`: enable this when you want users to submit requests.
 - `Enable 4K Requests`: optional.
 - `Allowed Jellyfin User IDs`: optional. Leave empty to allow any authenticated Jellyfin user to submit requests.

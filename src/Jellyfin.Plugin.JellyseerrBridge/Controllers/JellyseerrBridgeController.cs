@@ -12,9 +12,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.JellyseerrBridge.Configuration;
 using Jellyfin.Plugin.JellyseerrBridge.Models;
+using MediaBrowser.Common.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyseerrBridge.Controllers;
 
@@ -28,22 +30,135 @@ public sealed class JellyseerrBridgeController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<JellyseerrBridgeController> _logger;
+
     /// <summary>
-    /// Gets client-visible bridge status without exposing secrets.
+    /// Initializes a new instance of the <see cref="JellyseerrBridgeController"/> class.
+    /// </summary>
+    /// <param name="httpClientFactory">Jellyfin's shared HTTP client factory.</param>
+    /// <param name="logger">Logger.</param>
+    public JellyseerrBridgeController(IHttpClientFactory httpClientFactory, ILogger<JellyseerrBridgeController> logger)
+    {
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Gets bridge status for signed-in users. It says whether the bridge is set up, but
+    /// not where Jellyseerr lives, since this server may be reachable from the internet.
     /// </summary>
     /// <returns>Bridge status.</returns>
     [HttpGet("Status")]
-    [AllowAnonymous]
     public ActionResult<BridgeStatus> Status()
     {
         var config = GetConfig();
-        var baseUri = TryCreateBaseUri(config);
         return new BridgeStatus
         {
-            IsConfigured = baseUri is not null && !string.IsNullOrWhiteSpace(config.JellyseerrApiKey),
-            RequestSubmissionEnabled = config.EnableRequestSubmission,
-            JellyseerrHost = baseUri?.Host
+            IsConfigured = TryCreateBaseUri(config) is not null && !string.IsNullOrWhiteSpace(config.JellyseerrApiKey),
+            RequestSubmissionEnabled = config.EnableRequestSubmission
         };
+    }
+
+    /// <summary>
+    /// Checks that Jellyseerr can be reached and that the API key works. Used by the
+    /// Test Connection button on the settings page, so it's limited to administrators.
+    /// </summary>
+    /// <param name="request">The URL and key to test. Blank values fall back to the saved settings.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Whether the connection worked, with a message to show the admin.</returns>
+    [HttpPost("TestConnection")]
+    [Authorize(Policy = "RequiresElevation")]
+    public async Task<ActionResult<ConnectionTestResult>> TestConnection([FromBody] ConnectionTestRequest request, CancellationToken cancellationToken)
+    {
+        var config = GetConfig();
+        var baseUrl = string.IsNullOrWhiteSpace(request.BaseUrl) ? config.JellyseerrBaseUrl : request.BaseUrl.Trim();
+        var apiKey = string.IsNullOrWhiteSpace(request.ApiKey) ? config.JellyseerrApiKey : request.ApiKey.Trim();
+
+        var baseUri = TryCreateBaseUri(baseUrl);
+        if (baseUri is null)
+        {
+            return TestFailed("Enter a full URL starting with http:// or https://, for example http://jellyseerr:5055.");
+        }
+
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return TestFailed("Enter the Jellyseerr API key. You can find it in Jellyseerr under Settings, General.");
+        }
+
+        using var client = CreateClient(baseUri, apiKey);
+
+        string? version;
+        try
+        {
+            using var statusResponse = await client.GetAsync("/api/v1/status", cancellationToken).ConfigureAwait(false);
+            if (!statusResponse.IsSuccessStatusCode)
+            {
+                return TestFailed($"Something answered at {baseUri.Authority}, but not like Jellyseerr does (HTTP {(int)statusResponse.StatusCode}). Check the URL and port.");
+            }
+
+            version = await ReadVersionAsync(statusResponse, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return TestFailed(UnreachableMessage(baseUri, ex));
+        }
+
+        var jellyseerrName = version is null ? "Jellyseerr" : $"Jellyseerr {version}";
+        try
+        {
+            using var meResponse = await client.GetAsync("/api/v1/auth/me", cancellationToken).ConfigureAwait(false);
+            if (meResponse.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+            {
+                return TestFailed($"Reached {jellyseerrName}, but it rejected the API key. Copy the key again from Jellyseerr under Settings, General.");
+            }
+
+            if (!meResponse.IsSuccessStatusCode)
+            {
+                return TestFailed($"Reached {jellyseerrName}, but checking the API key failed with HTTP {(int)meResponse.StatusCode}.");
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return TestFailed($"Reached {jellyseerrName}, but the connection dropped while checking the API key: {ex.Message}");
+        }
+
+        return new ConnectionTestResult
+        {
+            Success = true,
+            Message = $"Connected to {jellyseerrName} and the API key works. Remember to save."
+        };
+    }
+
+    private static ConnectionTestResult TestFailed(string message)
+    {
+        return new ConnectionTestResult { Success = false, Message = message };
+    }
+
+    private static string UnreachableMessage(Uri baseUri, Exception ex)
+    {
+        var message = $"Couldn't reach Jellyseerr at {baseUri.Authority}: {ex.Message}";
+        if (baseUri.IsLoopback)
+        {
+            // The mistake that's easiest to make: in Docker, localhost is the Jellyfin container itself.
+            message += " If Jellyfin runs in Docker, localhost means the Jellyfin container itself, not your server. Use the Jellyseerr container name instead, for example http://jellyseerr:5055.";
+        }
+
+        return message;
+    }
+
+    private static async Task<string?> ReadVersionAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return document.RootElement.ValueKind == JsonValueKind.Object ? ReadString(document.RootElement, "version") : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -229,7 +344,12 @@ public sealed class JellyseerrBridgeController : ControllerBase
 
     private static Uri? TryCreateBaseUri(PluginConfiguration config)
     {
-        if (!Uri.TryCreate(config.JellyseerrBaseUrl, UriKind.Absolute, out var uri))
+        return TryCreateBaseUri(config.JellyseerrBaseUrl);
+    }
+
+    private static Uri? TryCreateBaseUri(string? baseUrl)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri))
         {
             return null;
         }
@@ -251,11 +371,18 @@ public sealed class JellyseerrBridgeController : ControllerBase
             throw new InvalidOperationException("Jellyseerr API key is not configured.");
         }
 
-        var client = new HttpClient();
+        return CreateClient(baseUri, config.JellyseerrApiKey);
+    }
+
+    private HttpClient CreateClient(Uri baseUri, string apiKey)
+    {
+        // The factory hands out a fresh HttpClient each time but reuses the network
+        // connections underneath, so making one per call no longer wastes sockets.
+        var client = _httpClientFactory.CreateClient(NamedClient.Default);
         client.BaseAddress = baseUri;
         client.Timeout = TimeSpan.FromSeconds(30);
         client.DefaultRequestHeaders.Remove("X-Api-Key");
-        client.DefaultRequestHeaders.Add("X-Api-Key", config.JellyseerrApiKey);
+        client.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
         client.DefaultRequestHeaders.Accept.Clear();
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
@@ -421,6 +548,21 @@ public sealed class JellyseerrBridgeController : ControllerBase
 
     private async Task<ServiceDefaults?> GetServiceDefaultsAsync(string mediaType, bool is4K, CancellationToken cancellationToken)
     {
+        // These defaults are a nice-to-have. If Jellyseerr's answer is missing or in a shape we
+        // don't expect, send the request without them and let Jellyseerr use its own defaults.
+        try
+        {
+            return await ReadServiceDefaultsAsync(mediaType, is4K, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            _logger.LogWarning(ex, "Couldn't read the default {MediaType} server from Jellyseerr; sending the request without it", mediaType);
+            return null;
+        }
+    }
+
+    private async Task<ServiceDefaults?> ReadServiceDefaultsAsync(string mediaType, bool is4K, CancellationToken cancellationToken)
+    {
         var endpoint = mediaType == "movie" ? "/api/v1/settings/radarr" : "/api/v1/settings/sonarr";
         using var client = CreateClient();
         using var response = await client.GetAsync(endpoint, cancellationToken).ConfigureAwait(false);
@@ -438,8 +580,13 @@ public sealed class JellyseerrBridgeController : ControllerBase
 
         foreach (var server in document.RootElement.EnumerateArray())
         {
-            var serverIs4K = server.TryGetProperty("is4k", out var is4KElement) && is4KElement.GetBoolean();
-            var isDefault = server.TryGetProperty("isDefault", out var defaultElement) && defaultElement.GetBoolean();
+            if (server.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var serverIs4K = ReadBool(server, "is4k");
+            var isDefault = ReadBool(server, "isDefault");
             if (serverIs4K != is4K || !isDefault)
             {
                 continue;
@@ -456,6 +603,11 @@ public sealed class JellyseerrBridgeController : ControllerBase
         }
 
         return null;
+    }
+
+    private static bool ReadBool(JsonElement element, string property)
+    {
+        return element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
     }
 
     private static int? ReadInt(JsonElement element, string property)
