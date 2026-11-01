@@ -6,13 +6,18 @@
   // How often titles that are waiting or downloading get re-checked while the page is open.
   // Jellyseerr itself only syncs with Radarr and Sonarr about once a minute.
   const REFRESH_MS = 30000;
+
+  // An approved request with nothing downloading after this long probably means Radarr or
+  // Sonarr couldn't find a copy, so the detail page says so instead of "waiting".
+  const STALLED_AFTER_MS = 30 * 60 * 1000;
   const MAX_REFRESH_PER_ROUND = 8;
   const CATEGORIES = [
     { id: "trending", label: "Trending" },
     { id: "movies", label: "Movies" },
     { id: "upcoming-movies", label: "Upcoming Movies" },
     { id: "shows", label: "Shows" },
-    { id: "upcoming-shows", label: "Upcoming Shows" }
+    { id: "upcoming-shows", label: "Upcoming Shows" },
+    { id: "mine", label: "My Requests" }
   ];
 
   const state = {
@@ -27,6 +32,11 @@
     // Ratings, similar titles and the film collection for the open detail page. These load
     // after the main details so the page doesn't wait on them.
     extras: null,
+    // The signed-in user's request limits from Jellyseerr, if any are set.
+    quota: null,
+    // The "Report a problem" form on the open detail page, including anything typed so far,
+    // so it survives the page redrawing while someone is filling it in.
+    report: null,
     results: [],
     local: new Map(),
     pending: new Set(),
@@ -43,6 +53,7 @@
 
   const els = {
     status: document.getElementById("status"),
+    quota: document.getElementById("quota"),
     search: document.getElementById("search"),
     filterToggle: document.getElementById("filterToggle"),
     sortToggle: document.getElementById("sortToggle"),
@@ -124,6 +135,37 @@
     }
   }
 
+  async function loadQuota() {
+    try {
+      state.quota = await apiGet("/Quota");
+    } catch {
+      state.quota = null;
+    }
+    renderQuota();
+  }
+
+  // Jellyseerr's quota has a movie and a tv section, each with a limit over a number of days.
+  // A limit of 0 or nothing means unlimited, which isn't worth mentioning.
+  function quotaText(kind, quota) {
+    const limit = Number(quota?.limit) || 0;
+    if (!limit) return "";
+
+    const used = Number(quota.used) || 0;
+    const remaining = Math.max(0, Number.isFinite(Number(quota.remaining)) ? Number(quota.remaining) : limit - used);
+    // Jellyseerr's limits are rolling, counted over the last so many days.
+    const days = Number(quota.days) || 0;
+    const period = days === 7 ? " this week" : days === 1 ? " today" : days ? ` (limit is per ${days} days)` : "";
+    const text = `${remaining} of ${limit} ${kind.toLowerCase()} requests left${period}`;
+    return remaining === 0 ? `${text}. You've reached the limit for now.` : text;
+  }
+
+  function renderQuota() {
+    if (!els.quota) return;
+    const parts = [quotaText("Movie", state.quota?.movie), quotaText("Show", state.quota?.tv)].filter(Boolean);
+    els.quota.textContent = parts.join("  |  ");
+    els.quota.hidden = parts.length === 0;
+  }
+
   async function loadResults({ append = false } = {}) {
     state.loading = true;
     state.detail = null;
@@ -146,6 +188,10 @@
   }
 
   async function fetchResultPage(page) {
+    if (state.category === "mine" && !state.query) {
+      return apiGet(`/MyRequests?page=${page}`);
+    }
+
     if (state.query) {
       return apiGet(`/Search?query=${encodeURIComponent(state.query)}&page=${page}`);
     }
@@ -170,6 +216,7 @@
     state.detailBase = item;
     state.detail = null;
     state.extras = null;
+    state.report = null;
     state.detailLoading = true;
     renderBody();
     try {
@@ -256,7 +303,9 @@
       tagline: item.tagline || "",
       runtime: item.runtime,
       genres: (item.genres || []).map((genre) => genre.name || genre).filter(Boolean),
-      mediaInfo: item.mediaInfo || null
+      mediaInfo: item.mediaInfo || null,
+      // Only set on the My Requests tab: the request itself, as opposed to the title.
+      bridgeRequest: item.bridgeRequest || null
     };
   }
 
@@ -616,11 +665,38 @@
 
   // A short explanation under the request button on the detail page, so nobody is left
   // guessing what "approved" means when nothing is downloading yet.
-  function statusNote(status) {
+  function statusNote(status, item) {
     if (status === "pending approval") return "Waiting for an admin to approve the request in Jellyseerr.";
-    if (status === "approved") return "Approved. Waiting for a download to start, or for Jellyfin to add the finished download.";
     if (status === "requested") return "Request sent. Checking its status...";
-    return "";
+    if (status !== "approved") return "";
+
+    const since = approvedSince(item);
+    if (since && Date.now() - since > STALLED_AFTER_MS) {
+      const manager = item.mediaType === "tv" ? "Sonarr" : "Radarr";
+      return `Approved ${durationText(Date.now() - since)} ago, but nothing is downloading. ${manager} may not have found a copy yet, or the download finished and Jellyfin hasn't picked it up.`;
+    }
+    return "Approved. Waiting for a download to start, or for Jellyfin to add the finished download.";
+  }
+
+  // When the newest approved request was approved. Jellyseerr updates a request's
+  // "updatedAt" when an admin approves it, so that's used before "createdAt".
+  function approvedSince(item) {
+    const approved = (item?.mediaInfo?.requests || []).filter((request) => !request.is4k && request.status === 2);
+    const times = approved
+      .map((request) => Date.parse(request.updatedAt || request.createdAt || ""))
+      .filter((time) => !Number.isNaN(time));
+    return times.length ? Math.max(...times) : 0;
+  }
+
+  function durationText(milliseconds) {
+    const minutes = Math.floor(milliseconds / 60000);
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
+
+    const days = Math.floor(hours / 24);
+    return `${days} days`;
   }
 
   // Jellyseerr stores the Jellyfin item ID once a title is in the library. The request page
@@ -711,6 +787,7 @@
       state.local.set(itemKey, "requested");
       // Jellyseerr may auto-approve, so look up what actually happened rather than assume.
       refreshTitles([item]);
+      loadQuota();
     } catch (error) {
       state.local.set(itemKey, error.message.toLowerCase().includes("already") ? "requested" : `error: ${error.message}`);
     } finally {
@@ -757,7 +834,8 @@
     if (state.loading && state.results.length === 0) {
       els.results.innerHTML = `<div class="message">Loading...</div>`;
     } else if (state.results.length === 0) {
-      els.results.innerHTML = `<div class="message">No results found.</div>`;
+      const empty = state.category === "mine" && !state.query ? "You haven't requested anything yet." : "No results found.";
+      els.results.innerHTML = `<div class="message">${escapeHtml(empty)}</div>`;
     } else {
       els.results.innerHTML = `<div class="grid">${state.results.map(renderCard).join("")}</div>`;
     }
@@ -796,6 +874,7 @@
       renderRatings(item),
       item.overview ? `<p class="overview">${escapeHtml(item.overview)}</p>` : `<p class="overview">No overview available.</p>`,
       item.mediaType === "movie" ? renderMovieAction(item) : renderSeriesSummary(item),
+      renderReport(item),
       `</div>`,
       `</section>`,
       item.mediaType === "tv" ? renderSeasonGrid(item) : "",
@@ -830,8 +909,93 @@
   }
 
   function renderNotes(item, status) {
-    const notes = [statusNote(status), requestHistory(item)].filter(Boolean);
+    const notes = [statusNote(status, item), requestHistory(item)].filter(Boolean);
     return notes.map((note) => `<div class="status-note">${escapeHtml(note)}</div>`).join("");
+  }
+
+  // Only titles in the library can have problems. Jellyseerr files issues against its own
+  // media ID (mediaInfo.id), not the TMDB one.
+  function canReport(item) {
+    const status = item?.mediaInfo?.status;
+    return Number(item?.mediaInfo?.id) > 0 && (status === 4 || status === 5);
+  }
+
+  function renderReport(item) {
+    if (!canReport(item)) return "";
+
+    const report = state.report && state.report.key === key(item) ? state.report : null;
+    if (!report || !report.open) {
+      return [
+        report?.done ? `<div class="status-note report-done">Thanks. Your report is in Jellyseerr for an admin to look at.</div>` : "",
+        `<button class="action secondary detail-action" type="button" data-report-open="true">Report a problem</button>`
+      ].join("");
+    }
+
+    const draft = report.draft;
+    const types = [["1", "Video"], ["2", "Audio"], ["3", "Subtitles"], ["4", "Something else"]];
+    const seasonOptions = item.mediaType === "tv"
+      ? [`<option value="0">All seasons</option>`, ...(item.seasons || [])
+        .filter((season) => season.status === 4 || season.status === 5)
+        .map((season) => `<option value="${season.seasonNumber}"${String(season.seasonNumber) === draft.season ? " selected" : ""}>${escapeHtml(season.title)}</option>`)]
+      : [];
+
+    return [
+      `<form class="report-form" data-report-form="true">`,
+      `<div class="filter-field"><label for="reportType">What's wrong?</label><select id="reportType" name="type">`,
+      types.map(([value, label]) => `<option value="${value}"${value === draft.type ? " selected" : ""}>${label}</option>`).join(""),
+      `</select></div>`,
+      item.mediaType === "tv" ? [
+        `<div class="report-row">`,
+        `<div class="filter-field"><label for="reportSeason">Season</label><select id="reportSeason" name="season">${seasonOptions.join("")}</select></div>`,
+        `<div class="filter-field"><label for="reportEpisode">Episode</label><input id="reportEpisode" name="episode" type="number" min="0" step="1" placeholder="All episodes" value="${escapeHtml(draft.episode)}"></div>`,
+        `</div>`
+      ].join("") : "",
+      `<div class="filter-field"><label for="reportText">What happened?</label><textarea id="reportText" name="text" rows="4" maxlength="2000" placeholder="For example: no sound after 20 minutes, or subtitles are out of sync.">${escapeHtml(draft.text)}</textarea></div>`,
+      report.error ? `<div class="report-error">${escapeHtml(report.error)}</div>` : "",
+      `<div class="report-actions">`,
+      `<button class="action secondary" type="button" data-report-cancel="true">Cancel</button>`,
+      `<button class="action" type="submit"${report.sending ? " disabled" : ""}>${report.sending ? "Sending..." : "Send report"}</button>`,
+      `</div>`,
+      `</form>`
+    ].join("");
+  }
+
+  function readReportForm(form) {
+    if (!state.report || !form) return;
+    state.report.draft = {
+      type: form.elements.type?.value || "1",
+      season: form.elements.season?.value || "0",
+      episode: form.elements.episode?.value || "",
+      text: form.elements.text?.value || ""
+    };
+  }
+
+  async function sendReport(item) {
+    const report = state.report;
+    const draft = report.draft;
+    if (!draft.text.trim()) {
+      report.error = "Add a few words about what's wrong.";
+      renderBody();
+      return;
+    }
+
+    report.sending = true;
+    report.error = "";
+    renderBody();
+    try {
+      await apiPost("/Issue", {
+        mediaInfoId: Number(item.mediaInfo.id),
+        issueType: Number(draft.type),
+        message: draft.text.trim(),
+        problemSeason: item.mediaType === "tv" ? Number(draft.season) || 0 : 0,
+        problemEpisode: item.mediaType === "tv" ? Math.max(0, Math.floor(Number(draft.episode) || 0)) : 0
+      });
+      state.report = { key: key(item), open: false, done: true };
+    } catch (error) {
+      report.sending = false;
+      report.error = `The report didn't go through: ${error.message}`;
+    }
+    renderBody();
   }
 
   function renderRatings(item) {
@@ -964,6 +1128,23 @@
       : `<div class="${escapeHtml(className)} poster-fallback">${escapeHtml(item.title)}</div>`;
   }
 
+  // Jellyseerr's request status numbers: 1 waiting for approval, 2 approved, 3 declined,
+  // 4 failed to send for download, 5 completed. Waiting and approved already show in the
+  // title's status, so only the outcomes that need explaining are added here.
+  function requestLine(item) {
+    const request = item.bridgeRequest;
+    if (!request) return "";
+
+    const date = formatDate(request.createdAt);
+    let text = date ? `Requested ${date}` : "Requested";
+    const seasons = (request.seasons || []).filter((number) => number > 0);
+    if (seasons.length) text += `, season${seasons.length === 1 ? "" : "s"} ${seasons.join(", ")}`;
+    if (request.is4k) text += ", 4K";
+    if (request.status === 3) text += ". Declined";
+    if (request.status === 4) text += ". Couldn't be sent for download";
+    return `<div class="request-line${request.status === 3 || request.status === 4 ? " problem" : ""}">${escapeHtml(text)}</div>`;
+  }
+
   function renderCard(item) {
     const action = actionFor(item);
     const payload = escapeHtml(JSON.stringify({ id: item.id, mediaType: item.mediaType }));
@@ -976,6 +1157,7 @@
       `<div class="name">${escapeHtml(item.title)}${item.year ? ` (${escapeHtml(item.year)})` : ""}</div>`,
       `<div class="status">${escapeHtml(item.mediaType === "tv" ? "show" : "movie")} - ${escapeHtml(status)}</div>`,
       renderProgress(downloadsFor(item), item.mediaType),
+      requestLine(item),
       `</div>`,
       `</button>`,
       `<div class="card-actions">`,
@@ -1058,6 +1240,25 @@
         return;
       }
 
+      if (event.target.closest("[data-report-open]") && state.detail) {
+        state.report = {
+          key: key(state.detail),
+          open: true,
+          sending: false,
+          error: "",
+          draft: { type: "1", season: "0", episode: "", text: "" }
+        };
+        renderBody();
+        document.getElementById("reportText")?.focus();
+        return;
+      }
+
+      if (event.target.closest("[data-report-cancel]")) {
+        state.report = null;
+        renderBody();
+        return;
+      }
+
       if (event.target.closest("[data-request-collection]")) {
         requestCollection();
         return;
@@ -1091,6 +1292,22 @@
       if (event.target.closest("[data-load-more]")) {
         loadResults({ append: true });
       }
+    });
+
+    document.addEventListener("input", (event) => {
+      const form = event.target.closest?.("[data-report-form]");
+      if (form) readReportForm(form);
+    });
+    document.addEventListener("change", (event) => {
+      const form = event.target.closest?.("[data-report-form]");
+      if (form) readReportForm(form);
+    });
+    document.addEventListener("submit", (event) => {
+      const form = event.target.closest?.("[data-report-form]");
+      if (!form) return;
+      event.preventDefault();
+      readReportForm(form);
+      if (state.detail && !state.report?.sending) sendReport(state.detail);
     });
 
     window.addEventListener("scroll", () => {
@@ -1170,6 +1387,7 @@
   bindEvents();
   renderTabs();
   loadStatus().finally(loadResults);
+  loadQuota();
   setInterval(refreshInProgress, REFRESH_MS);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) refreshInProgress();

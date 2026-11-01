@@ -27,7 +27,7 @@ namespace Jellyfin.Plugin.JellyseerrBridge.Controllers;
 [ApiController]
 [Authorize]
 [Route("JellyseerrBridge")]
-public sealed class JellyseerrBridgeController : ControllerBase
+public sealed partial class JellyseerrBridgeController : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -467,8 +467,16 @@ public sealed class JellyseerrBridgeController : ControllerBase
             return validation;
         }
 
-        var payload = await BuildJellyseerrRequestPayloadAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ForwardPostAsync("/api/v1/request", payload, cancellationToken).ConfigureAwait(false);
+        // The request goes in under the person asking, so Jellyseerr's per-user approval
+        // rules and request limits apply to it.
+        var seerrUser = await ResolveSeerrUserAsync(cancellationToken).ConfigureAwait(false);
+        if (seerrUser.Id is not int seerrUserId)
+        {
+            return StatusCode(403, new { message = seerrUser.Error });
+        }
+
+        var payload = BuildJellyseerrRequestPayload(request);
+        return await ForwardPostAsync("/api/v1/request", payload, cancellationToken, seerrUserId).ConfigureAwait(false);
     }
 
     private static PluginConfiguration GetConfig()
@@ -496,7 +504,7 @@ public sealed class JellyseerrBridgeController : ControllerBase
         return uri;
     }
 
-    private HttpClient CreateClient()
+    private HttpClient CreateClient(int? asSeerrUser = null)
     {
         var config = GetConfig();
         var baseUri = TryCreateBaseUri(config) ?? throw new InvalidOperationException("Jellyseerr base URL is not configured.");
@@ -505,7 +513,14 @@ public sealed class JellyseerrBridgeController : ControllerBase
             throw new InvalidOperationException("Jellyseerr API key is not configured.");
         }
 
-        return CreateClient(baseUri, config.JellyseerrApiKey);
+        var client = CreateClient(baseUri, config.JellyseerrApiKey);
+        if (asSeerrUser is int seerrUserId)
+        {
+            // With the admin API key, this makes Jellyseerr treat the call as coming from that user.
+            client.DefaultRequestHeaders.Add("X-Api-User", seerrUserId.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return client;
     }
 
     private HttpClient CreateClient(Uri baseUri, string apiKey)
@@ -522,11 +537,11 @@ public sealed class JellyseerrBridgeController : ControllerBase
         return client;
     }
 
-    private async Task<IActionResult> ForwardGetAsync(string path, IReadOnlyDictionary<string, string?> query, CancellationToken cancellationToken)
+    private async Task<IActionResult> ForwardGetAsync(string path, IReadOnlyDictionary<string, string?> query, CancellationToken cancellationToken, int? asSeerrUser = null)
     {
         try
         {
-            using var client = CreateClient();
+            using var client = CreateClient(asSeerrUser);
             var url = BuildRelativeUrl(path, query);
             using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
             return await ProxyResponseAsync(response, cancellationToken).ConfigureAwait(false);
@@ -537,11 +552,11 @@ public sealed class JellyseerrBridgeController : ControllerBase
         }
     }
 
-    private async Task<IActionResult> ForwardPostAsync(string path, JsonElement payload, CancellationToken cancellationToken)
+    private async Task<IActionResult> ForwardPostAsync(string path, JsonElement payload, CancellationToken cancellationToken, int? asSeerrUser = null)
     {
         try
         {
-            using var client = CreateClient();
+            using var client = CreateClient(asSeerrUser);
             using var content = new StringContent(payload.GetRawText(), Encoding.UTF8, "application/json");
             using var response = await client.PostAsync(path, content, cancellationToken).ConfigureAwait(false);
             return await ProxyResponseAsync(response, cancellationToken).ConfigureAwait(false);
@@ -626,14 +641,12 @@ public sealed class JellyseerrBridgeController : ControllerBase
             return true;
         }
 
-        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? User.FindFirstValue("sub")
-            ?? User.FindFirstValue("jellyfin:userId")
-            ?? User.FindFirstValue("Jellyfin-UserId");
-        return userId is not null && config.AllowedUserIds.Contains(userId, StringComparer.OrdinalIgnoreCase);
+        // Compare as IDs rather than text, so an ID pasted with or without dashes still matches.
+        var userId = CurrentJellyfinUserId();
+        return userId is not null && config.AllowedUserIds.Select(NormalizeUserId).Contains(userId, StringComparer.OrdinalIgnoreCase);
     }
 
-    private async Task<JsonElement> BuildJellyseerrRequestPayloadAsync(BridgeRequest request, CancellationToken cancellationToken)
+    private static JsonElement BuildJellyseerrRequestPayload(BridgeRequest request)
     {
         var mediaType = request.MediaType.ToLowerInvariant() == "tv" ? "tv" : "movie";
         var payload = new Dictionary<string, object?>
@@ -648,110 +661,14 @@ public sealed class JellyseerrBridgeController : ControllerBase
             payload["seasons"] = request.Seasons is null ? "all" : JsonSerializer.Deserialize<object>(request.Seasons.Value.GetRawText(), JsonOptions);
         }
 
-        var defaults = await GetServiceDefaultsAsync(mediaType, request.Is4K, cancellationToken).ConfigureAwait(false);
-        if (defaults is not null)
-        {
-            if (defaults.ServerId is not null)
-            {
-                payload["serverId"] = defaults.ServerId;
-            }
-
-            if (defaults.ProfileId is not null)
-            {
-                payload["profileId"] = defaults.ProfileId;
-            }
-
-            if (!string.IsNullOrWhiteSpace(defaults.RootFolder))
-            {
-                payload["rootFolder"] = defaults.RootFolder;
-            }
-
-            if (defaults.Tags is not null)
-            {
-                payload["tags"] = JsonSerializer.Deserialize<object>(defaults.Tags.Value.GetRawText(), JsonOptions);
-            }
-
-            if (mediaType == "tv" && defaults.LanguageProfileId is not null)
-            {
-                payload["languageProfileId"] = defaults.LanguageProfileId;
-            }
-        }
-
+        // No server, profile or folder here: Jellyseerr uses its default Radarr or Sonarr server
+        // when none is given, and it doesn't let regular users pick those anyway.
         return JsonSerializer.SerializeToElement(payload, JsonOptions);
-    }
-
-    private async Task<ServiceDefaults?> GetServiceDefaultsAsync(string mediaType, bool is4K, CancellationToken cancellationToken)
-    {
-        // These defaults are a nice-to-have. If Jellyseerr's answer is missing or in a shape we
-        // don't expect, send the request without them and let Jellyseerr use its own defaults.
-        try
-        {
-            return await ReadServiceDefaultsAsync(mediaType, is4K, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
-        {
-            _logger.LogWarning(ex, "Couldn't read the default {MediaType} server from Jellyseerr; sending the request without it", mediaType);
-            return null;
-        }
-    }
-
-    private async Task<ServiceDefaults?> ReadServiceDefaultsAsync(string mediaType, bool is4K, CancellationToken cancellationToken)
-    {
-        var endpoint = mediaType == "movie" ? "/api/v1/settings/radarr" : "/api/v1/settings/sonarr";
-        using var client = CreateClient();
-        using var response = await client.GetAsync(endpoint, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            return null;
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-        if (document.RootElement.ValueKind != JsonValueKind.Array)
-        {
-            return null;
-        }
-
-        foreach (var server in document.RootElement.EnumerateArray())
-        {
-            if (server.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
-
-            var serverIs4K = ReadBool(server, "is4k");
-            var isDefault = ReadBool(server, "isDefault");
-            if (serverIs4K != is4K || !isDefault)
-            {
-                continue;
-            }
-
-            return new ServiceDefaults
-            {
-                ServerId = ReadInt(server, "id"),
-                ProfileId = ReadInt(server, "activeProfileId"),
-                RootFolder = ReadString(server, "activeDirectory"),
-                Tags = server.TryGetProperty("tags", out var tags) ? tags.Clone() : null,
-                LanguageProfileId = ReadInt(server, "activeLanguageProfileId")
-            };
-        }
-
-        return null;
     }
 
     private static bool ReadBool(JsonElement element, string property)
     {
         return element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
-    }
-
-    private static int? ReadInt(JsonElement element, string property)
-    {
-        if (!element.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.Number)
-        {
-            return null;
-        }
-
-        return value.TryGetInt32(out var result) ? result : null;
     }
 
     private static string? ReadString(JsonElement element, string property)
