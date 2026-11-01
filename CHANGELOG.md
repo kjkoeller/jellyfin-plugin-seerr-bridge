@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3.0
+
+Optional automatic approval for every request.
+
+Changes:
+
+- New setting, Approve every request automatically. When it's on, any request Jellyseerr leaves waiting for an admin is approved by the plugin straight away using the admin key, so it goes on to Radarr or Sonarr. This works whether or not a user's Jellyseerr account has Auto-Approve.
+- Requests are still made under the person asking, and Jellyseerr still checks their request limits. Only requests that come back as waiting for approval are touched; ones Jellyseerr already approved are left alone.
+- If Jellyseerr refuses the approval, the request still goes through and waits for an admin as before, and the reason is written to the Jellyfin log.
+
 ## 0.3.2.0
 
 Stops other users' details and admin-only information reaching the browser.

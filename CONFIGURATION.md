@@ -30,7 +30,11 @@ The first time someone requests something, the plugin finds their Jellyseerr acc
 
 ### Keeping requests auto-approved
 
-Before 0.3.0, everything was auto-approved because it went in as the admin. To keep it that way for everyone, set this up in Jellyseerr:
+Before 0.3.0, everything was auto-approved because it went in as the admin. There are two ways to keep it that way.
+
+**The easy way (0.3.3 and later):** tick **Approve every request automatically** in the plugin settings. Any request Jellyseerr would leave waiting for an admin is approved by the plugin straight away, with the admin key, so it goes on to Radarr or Sonarr. The request still shows under the person who made it, and request limits set in Jellyseerr still apply. If Jellyseerr refuses the approval for some reason, the request is still made and waits for an admin as usual, and the Jellyfin log says why.
+
+**The Jellyseerr way:** give everyone Auto-Approve in Jellyseerr itself. This also covers requests people make in Jellyseerr directly, not just through Jellyfin:
 
 1. **For new users:** go to Settings, Users and tick **Auto-Approve** under Default Permissions. This also covers users the plugin imports. Make sure **Request** and **Report Issues** are ticked too.
 2. **For existing users:** go to Users, tick the box at the top of the list to select everyone, choose **Bulk Edit**, tick **Auto-Approve**, and save.

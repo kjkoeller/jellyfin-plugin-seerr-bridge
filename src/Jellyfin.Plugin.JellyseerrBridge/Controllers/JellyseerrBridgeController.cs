@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Claims;
@@ -477,7 +478,81 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
         }
 
         var payload = BuildJellyseerrRequestPayload(request);
-        return await ForwardPostAsync("/api/v1/request", payload, cancellationToken, seerrUserId).ConfigureAwait(false);
+        if (!config.AutoApproveRequests)
+        {
+            return await ForwardPostAsync("/api/v1/request", payload, cancellationToken, seerrUserId).ConfigureAwait(false);
+        }
+
+        try
+        {
+            using var client = CreateClient(seerrUserId);
+            using var content = new StringContent(payload.GetRawText(), Encoding.UTF8, "application/json");
+            using var response = await client.PostAsync("/api/v1/request", content, cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                body = await ApproveIfPendingAsync(body, cancellationToken).ConfigureAwait(false);
+            }
+
+            return SeerrResult(response.StatusCode, body, response.Content.Headers.ContentType?.ToString(), "/api/v1/request");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
+        {
+            return JellyseerrFailed(ex, "/api/v1/request");
+        }
+    }
+
+    /// <summary>
+    /// Approves a request Jellyseerr has left waiting for an admin, when the "approve every
+    /// request" setting is on. It's done with the admin key (no X-Api-User), the same as an
+    /// admin pressing Approve in Jellyseerr, which then sends it to Radarr or Sonarr.
+    /// </summary>
+    /// <param name="createdRequest">Jellyseerr's answer to creating the request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The approved request, or the original answer if there was nothing to approve or approving failed.</returns>
+    private async Task<string> ApproveIfPendingAsync(string createdRequest, CancellationToken cancellationToken)
+    {
+        int requestId;
+        try
+        {
+            using var document = JsonDocument.Parse(createdRequest);
+            var root = document.RootElement;
+            // Jellyseerr's request status 1 means waiting for approval. Anything else (already
+            // approved because the user has Auto-Approve, say) is left alone.
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("status", out var status) || !status.TryGetInt32(out var statusValue) || statusValue != 1
+                || !root.TryGetProperty("id", out var id) || !id.TryGetInt32(out requestId))
+            {
+                return createdRequest;
+            }
+        }
+        catch (JsonException)
+        {
+            return createdRequest;
+        }
+
+        try
+        {
+            using var adminClient = CreateClient();
+            using var approve = await adminClient.PostAsync(
+                string.Format(CultureInfo.InvariantCulture, "/api/v1/request/{0}/approve", requestId),
+                content: null,
+                cancellationToken).ConfigureAwait(false);
+            if (approve.IsSuccessStatusCode)
+            {
+                return await approve.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            _logger.LogWarning("Jellyseerr wouldn't approve request {RequestId} (HTTP {StatusCode}); it's waiting for an admin instead", requestId, (int)approve.StatusCode);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Couldn't approve request {RequestId}; it's waiting for an admin instead", requestId);
+        }
+
+        // The request itself went through, so the user still gets a success; it just shows as
+        // waiting for approval until someone approves it in Jellyseerr.
+        return createdRequest;
     }
 
     private static PluginConfiguration GetConfig()
@@ -588,26 +663,31 @@ public sealed partial class JellyseerrBridgeController : ControllerBase
     private async Task<IActionResult> ProxyResponseAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if ((int)response.StatusCode >= 500)
+        return SeerrResult(response.StatusCode, body, response.Content.Headers.ContentType?.ToString(), response.RequestMessage?.RequestUri?.AbsolutePath);
+    }
+
+    private IActionResult SeerrResult(HttpStatusCode statusCode, string body, string? contentType, string? path)
+    {
+        if ((int)statusCode >= 500)
         {
             // Jellyseerr's own failures can include internal details, so log them and send
             // users a plain message. Its 4xx answers (already requested, over the limit and
             // so on) are meant for users and pass through as they are.
             _logger.LogWarning(
                 "Jellyseerr answered {Path} with HTTP {StatusCode}: {Body}",
-                response.RequestMessage?.RequestUri?.AbsolutePath,
-                (int)response.StatusCode,
+                path,
+                (int)statusCode,
                 body.Length > 500 ? body[..500] : body);
             return StatusCode(502, new { message = JellyseerrUnavailableMessage });
         }
 
         return new ContentResult
         {
-            StatusCode = (int)response.StatusCode,
+            StatusCode = (int)statusCode,
             // Jellyseerr answers as if an admin were asking, so strip out other people's
             // details and admin-only links before this reaches a browser.
             Content = SeerrResponseSanitizer.Sanitize(body),
-            ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json"
+            ContentType = contentType ?? "application/json"
         };
     }
 
