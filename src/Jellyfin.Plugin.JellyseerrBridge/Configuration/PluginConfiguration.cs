@@ -28,6 +28,13 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     public bool Enable4KRequests { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the plugin approves every request itself, so
+    /// nobody waits for an admin even if their Jellyseerr account doesn't have Auto-Approve.
+    /// Request limits are still checked by Jellyseerr when the request is made.
+    /// </summary>
+    public bool AutoApproveRequests { get; set; }
+
+    /// <summary>
     /// Gets or sets the Jellyfin user IDs allowed to submit requests. Empty allows any authenticated Jellyfin user.
     /// </summary>
     public string[] AllowedUserIds { get; set; } = [];
